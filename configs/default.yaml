@@ -1,0 +1,65 @@
+# PG-MambaGAN Default Configuration
+# ==================================
+
+# Model
+model:
+  name: "pg-mambagan"
+  img_width: 256
+  img_height: 256
+  channels: 1
+  generator: "mamba_u"        # "unet_baseline", "unet_attention", "mamba_u"
+  discriminator: "patchgan"
+
+# Generator (Mamba-U)
+generator:
+  encoder_filters: [64, 128, 256, 512, 512, 512, 512, 512]
+  decoder_filters: [512, 512, 512, 512, 256, 128, 64]
+  mamba_d_state: 16           # Mamba SSM state dimension
+  mamba_d_conv: 4             # Mamba local convolution width
+  mamba_expand: 2             # Mamba expansion factor
+  dropout_rate: 0.5
+  use_spectral_norm: false
+
+# Discriminator
+discriminator:
+  type: "patchgan"
+  filters: [64, 128, 256, 512]
+  use_spectral_norm: true
+
+# Loss weights
+loss:
+  lambda_adv: 1.0             # Adversarial (WGAN) loss
+  lambda_l1: 100.0            # L1 reconstruction loss
+  lambda_perceptual: 10.0     # VGG perceptual loss
+  lambda_nps: 5.0             # Noise Power Spectrum loss
+  lambda_freq: 1.0            # FFT frequency domain loss
+  gradient_penalty: 10.0      # WGAN-GP gradient penalty
+
+# Training
+training:
+  epochs: 100
+  batch_size: 4
+  learning_rate_g: 2e-4
+  learning_rate_d: 2e-4
+  beta1: 0.5
+  beta2: 0.9
+  n_critic: 1                 # D steps per G step
+  checkpoint_freq: 5          # Save every N epochs
+  val_split: 0.10
+  random_seed: 42
+
+# Data
+data:
+  dataset: "mayo"             # "mayo", "aapm", "phantomx"
+  hu_min: -1000
+  hu_max: 1000
+  normalize_range: [-1, 1]
+  augmentation:
+    horizontal_flip: true
+    rotation_range: 5
+    zoom_range: 0.05
+
+# Evaluation
+evaluation:
+  metrics: ["psnr", "ssim", "fid", "lpips", "nps"]
+  eval_batch_size: 50

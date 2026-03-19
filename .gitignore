@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (büyük dosyalar)
+data/mayo/*.npy
+data/phantomx/*.npy
+data/aapm/*.npy
+*.h5
+*.hdf5
+
+# Experiment results (büyük dosyalar)
+experiments/*/results/*.png
+experiments/*/checkpoints/*.h5
+
+# Misc
+*.log
+*.bak
