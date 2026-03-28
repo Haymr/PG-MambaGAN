@@ -1,0 +1,80 @@
+# =============================================
+# PG-MambaGAN Default Configuration
+# VRAM-Optimized for T4/RTX3080 (16GB)
+# =============================================
+
+model:
+  generator: "vss_unet"          # "vss_unet" or "unet_baseline"
+  discriminator: "patchgan_sn"
+  img_size: 512
+  channels: 1
+
+generator:
+  embed_dim: 96
+  depths: [2, 2, 4, 2]          # VSS blocks per stage
+  patch_size: 4
+  drop_rate: 0.0
+  drop_path_rate: 0.2
+  gradient_checkpointing: true   # ⚠️ MANDATORY — ~60% VRAM savings
+
+discriminator:
+  filters: [64, 128, 256, 512]
+  use_spectral_norm: true
+
+loss:
+  lambda_adv: 1.0
+  lambda_l1: 100.0
+  lambda_perceptual: 10.0
+  lambda_nps: 5.0
+  lambda_freq: 1.0
+  gradient_penalty: 10.0
+  nps_tissue_weights:
+    soft_tissue: 2.0
+    lung: 1.5
+    fat: 1.0
+    bone: 0.5
+    air: 0.0
+  nps_mask_source: "ndct"        # ⚠️ MANDATORY — masking from ground truth
+  nps_morphological_kernel: 5    # closing/opening kernel size
+
+training:
+  epochs: 200
+  batch_size: 1                  # ⚠️ Physical batch (VRAM-safe)
+  gradient_accumulation: 8       # ⚠️ Effective batch = 1×8 = 8
+  learning_rate_g: 1.0e-4
+  learning_rate_d: 1.0e-4
+  beta1: 0.0
+  beta2: 0.99
+  n_critic: 5
+  ema_decay: 0.999
+  mixed_precision: true          # ⚠️ BFloat16 AMP
+  precision_dtype: "bfloat16"    # "bfloat16" or "float16"
+  scheduler: "cosine"
+  warmup_epochs: 5
+
+data:
+  dataset: "mayo"
+  total_patients: 300
+  data_root: null                # Set via CLI: --data-path
+  structure: "flat"              # "patient_folders" or "flat"
+  patient_split:
+    train_ratio: 0.8             # 240 patients
+    val_ratio: 0.1               # 30 patients
+    test_ratio: 0.1              # 30 patients
+  augmentation:
+    horizontal_flip: true
+    vertical_flip: false
+    rotation: true
+    scale_range: [0.95, 1.05]
+
+# Platform-independent paths
+paths:
+  data_root: null                # CLI: --data-path
+  output_dir: "experiments"
+  checkpoint_dir: null           # null → output_dir/checkpoints
+
+wandb:
+  project: "pg-mambagan"
+  entity: null
+  log_images_every: 10
+  log_gradients: true

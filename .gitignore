@@ -1,0 +1,55 @@
+# PG-MambaGAN
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Training artifacts (large files)
+experiments/
+*.pth
+*.pt
+*.h5
+*.ckpt
+
+# Data (never commit patient data)
+data/mayo/
+data/phantomx/
+data/processed/
+*.npy
+*.nii
+*.nii.gz
+*.dcm
+
+# Logs
+*.log
+wandb/
+
+# Misc
+.env
+*.bak
