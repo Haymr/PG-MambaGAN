@@ -334,6 +334,10 @@ class AnatomyAwareNPSLoss(nn.Module):
         
         # Power spectrum: |FFT|²
         power = (fft_shifted.real ** 2 + fft_shifted.imag ** 2) / (ps * ps)
+        power = torch.log1p(power)
+
+        center = ps // 2
+        power[:, center, center] = 0.0
         
         # Average over all patches
         mean_power = power.mean(dim=0)  # (ps, ps)

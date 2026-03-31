@@ -279,12 +279,13 @@ class Trainer:
                     total_g_loss = total_g_loss + loss_perc
                     g_losses["g_perc"] = g_losses.get("g_perc", 0) + loss_perc.item() / self.grad_accum
                 
-                # Frequency
-                if "freq" in self.g_loss_fns:
-                    loss_freq = self.g_loss_fns["freq"](fake, ndct) * self.loss_weights["freq"]
-                    total_g_loss = total_g_loss + loss_freq
-                    g_losses["g_freq"] = g_losses.get("g_freq", 0) + loss_freq.item() / self.grad_accum
             
+            # Frequency loss (outside AMP — uses FFT which may not support bfloat16)
+            if "freq" in self.g_loss_fns:
+                loss_freq = self.g_loss_fns["freq"](fake.float(), ndct.float()) * self.loss_weights["freq"]
+                total_g_loss = total_g_loss + loss_freq
+                g_losses["g_freq"] = g_losses.get("g_freq", 0) + loss_freq.item() / self.grad_accum
+
             # NPS loss (outside AMP — uses FFT which may not support bfloat16)
             if "nps" in self.g_loss_fns:
                 loss_nps, tissue_losses = self.g_loss_fns["nps"](fake.float(), ndct.float())
