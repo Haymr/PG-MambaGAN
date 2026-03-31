@@ -102,7 +102,7 @@ def compute_ssim(
     sigma_x2 = scipy.ndimage.gaussian_filter(predicted ** 2, sigma=1.5) - mu_x_sq
     sigma_y2 = scipy.ndimage.gaussian_filter(target ** 2, sigma=1.5) - mu_y_sq
     sigma_xy = scipy.ndimage.gaussian_filter(predicted * target, sigma=1.5) - mu_xy
-    
+
     ssim_map = ((2 * mu_xy + c1) * (2 * sigma_xy + c2)) / \
                ((mu_x_sq + mu_y_sq + c1) * (sigma_x2 + sigma_y2 + c2))
 
@@ -291,6 +291,28 @@ def compute_volumetric_metrics(
     ssim_3d = compute_3d_ssim(pred_volume, target_volume, data_range)
     results.update({k: v for k, v in ssim_3d.items() if "per_slice" not in k})
     
+    # Coronal metrics
+    pred_coronal = np.transpose(pred_volume, (1, 0, 2))
+    target_coronal = np.transpose(target_volume, (1, 0, 2))
+    coronal_ssim = []
+    coronal_psnr = []
+    for i in range(pred_coronal.shape[0]):
+        coronal_ssim.append(compute_ssim(pred_coronal[i], target_coronal[i], data_range))
+        coronal_psnr.append(compute_psnr(pred_coronal[i], target_coronal[i], data_range))
+    results["coronal_ssim_mean"] = float(np.mean(coronal_ssim))
+    results["coronal_psnr_mean"] = float(np.mean(coronal_psnr))
+
+    # Sagittal metrics
+    pred_sagittal = np.transpose(pred_volume, (2, 0, 1))
+    target_sagittal = np.transpose(target_volume, (2, 0, 1))
+    sagittal_ssim = []
+    sagittal_psnr = []
+    for i in range(pred_sagittal.shape[0]):
+        sagittal_ssim.append(compute_ssim(pred_sagittal[i], target_sagittal[i], data_range))
+        sagittal_psnr.append(compute_psnr(pred_sagittal[i], target_sagittal[i], data_range))
+    results["sagittal_ssim_mean"] = float(np.mean(sagittal_ssim))
+    results["sagittal_psnr_mean"] = float(np.mean(sagittal_psnr))
+
     # Flickering Index
     fi = compute_flickering_index(pred_volume, target_volume)
     results.update(fi)

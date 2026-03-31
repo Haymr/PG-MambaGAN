@@ -123,7 +123,7 @@ class HallucinationAnalyzer:
     
     def _denormalize(self, image: np.ndarray) -> np.ndarray:
         """Convert [-1, 1] → HU."""
-        return (image + 1.0) / 2.0 * (self.hu_max - self.hu_min) + self.hu_min
+        return np.clip((image + 1.0) / 2.0 * (self.hu_max - self.hu_min) + self.hu_min, self.hu_min, self.hu_max)
     
     def _numpy_to_sitk(
         self, image: np.ndarray, is_mask: bool = False

@@ -201,7 +201,7 @@ class AnatomyAwareNPSLoss(nn.Module):
         Inverse of: norm = (hu - hu_min) / (hu_max - hu_min) * 2 - 1
         Therefore:  hu = (norm + 1) / 2 * (hu_max - hu_min) + hu_min
         """
-        return (x + 1.0) / 2.0 * (self.hu_max - self.hu_min) + self.hu_min
+        return torch.clamp((x + 1.0) / 2.0 * (self.hu_max - self.hu_min) + self.hu_min, min=self.hu_min, max=self.hu_max)
     
     # ------------------------------------------------------------------
     # Step 2-3: Create tissue masks from NDCT (DETACHED)
