@@ -421,9 +421,14 @@ class AnatomyAwareNPSLoss(nn.Module):
                 tissue_losses[tissue_name] = 0.0
                 continue
             
+            import torchvision.transforms.functional as TF
+            # Differentiable residual noise extraction
+            pred_noise_patches = pred_patches - TF.gaussian_blur(pred_patches, kernel_size=5, sigma=1.0)
+            ndct_noise_patches = ndct_patches - TF.gaussian_blur(ndct_patches, kernel_size=5, sigma=1.0)
+
             # ██ Step 5: Compute NPS for both ██
-            nps_pred = self._compute_nps(pred_patches)
-            nps_ndct = self._compute_nps(ndct_patches)
+            nps_pred = self._compute_nps(pred_noise_patches)
+            nps_ndct = self._compute_nps(ndct_noise_patches)
             
             # ██ Step 6: Weighted L2 loss between NPS curves ██
             nps_diff = F.mse_loss(nps_pred, nps_ndct)

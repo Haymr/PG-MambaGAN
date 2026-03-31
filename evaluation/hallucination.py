@@ -58,6 +58,8 @@ DEFAULT_RADIOMICS_PARAMS = {
         "interpolator": "sitkBSpline",
         "normalize": False,
         "normalizeScale": 1,
+        "force2D": True,
+        "force2Ddimension": 0,
     },
 }
 
@@ -222,9 +224,10 @@ class HallucinationAnalyzer:
         }
         
         # Basic entropy estimate
-        hist, _ = np.histogram(masked, bins=64, density=True)
+        hist, _ = np.histogram(masked, bins=64, density=False)
+        hist = hist.astype(float) / np.sum(hist)
         hist = hist[hist > 0]
-        features["firstorder_Entropy"] = float(-np.sum(hist * np.log2(hist + 1e-10)))
+        features["firstorder_Entropy"] = float(-np.sum(hist * np.log2(hist)))
         
         return features
     

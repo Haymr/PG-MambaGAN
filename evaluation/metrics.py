@@ -14,6 +14,7 @@ Standard image quality metrics and 3D volumetric metrics.
 
 import numpy as np
 from typing import Dict, Optional, Tuple
+import scipy.ndimage
 
 try:
     from skimage.metrics import (
@@ -29,10 +30,22 @@ except ImportError:
 # 2D Per-Slice Metrics
 # ======================================================================
 
+def get_body_mask(target_hu: np.ndarray) -> np.ndarray:
+    """
+    Generate a binary mask of the patient's body region using a -500 HU threshold
+    combined with morphological closing and filling.
+    """
+    mask = target_hu > -500
+    mask = scipy.ndimage.binary_closing(mask, structure=np.ones((5, 5)))
+    mask = scipy.ndimage.binary_fill_holes(mask)
+    return mask
+
+
 def compute_psnr(
     predicted: np.ndarray,
     target: np.ndarray,
     data_range: float = 2.0,
+    body_mask: Optional[np.ndarray] = None,
 ) -> float:
     """
     Compute Peak Signal-to-Noise Ratio.
@@ -41,7 +54,14 @@ def compute_psnr(
         predicted: Predicted image (H, W) in [-1, 1].
         target: Ground truth image (H, W) in [-1, 1].
         data_range: Dynamic range (2.0 for [-1, 1]).
+        body_mask: Optional boolean mask of the body region.
     """
+    if body_mask is not None:
+        mse = np.mean((predicted[body_mask == 1] - target[body_mask == 1]) ** 2)
+        if mse == 0:
+            return float("inf")
+        return float(10 * np.log10(data_range ** 2 / mse))
+
     if SKIMAGE_AVAILABLE:
         return float(_psnr(target, predicted, data_range=data_range))
     
@@ -55,7 +75,8 @@ def compute_ssim(
     predicted: np.ndarray,
     target: np.ndarray,
     data_range: float = 2.0,
-    win_size: int = 7,
+    win_size: int = 11,
+    body_mask: Optional[np.ndarray] = None,
 ) -> float:
     """
     Compute Structural Similarity Index.
@@ -65,33 +86,42 @@ def compute_ssim(
         target: Ground truth image (H, W) in [-1, 1].
         data_range: Dynamic range (2.0 for [-1, 1]).
         win_size: SSIM window size (must be odd, ≤ image dim).
+        body_mask: Optional boolean mask of the body region.
     """
-    if SKIMAGE_AVAILABLE:
-        return float(_ssim(target, predicted, data_range=data_range,
-                          win_size=win_size))
-    
-    # Fallback: simplified SSIM
+    # 2D spatial SSIM using an 11x11 sliding Gaussian window (sigma=1.5)
     c1 = (0.01 * data_range) ** 2
     c2 = (0.03 * data_range) ** 2
     
-    mu_x = np.mean(predicted)
-    mu_y = np.mean(target)
-    sigma_x2 = np.var(predicted)
-    sigma_y2 = np.var(target)
-    sigma_xy = np.cov(predicted.ravel(), target.ravel())[0, 1]
+    mu_x = scipy.ndimage.gaussian_filter(predicted, sigma=1.5)
+    mu_y = scipy.ndimage.gaussian_filter(target, sigma=1.5)
+
+    mu_x_sq = mu_x ** 2
+    mu_y_sq = mu_y ** 2
+    mu_xy = mu_x * mu_y
+
+    sigma_x2 = scipy.ndimage.gaussian_filter(predicted ** 2, sigma=1.5) - mu_x_sq
+    sigma_y2 = scipy.ndimage.gaussian_filter(target ** 2, sigma=1.5) - mu_y_sq
+    sigma_xy = scipy.ndimage.gaussian_filter(predicted * target, sigma=1.5) - mu_xy
     
-    ssim_val = ((2 * mu_x * mu_y + c1) * (2 * sigma_xy + c2)) / \
-               ((mu_x ** 2 + mu_y ** 2 + c1) * (sigma_x2 + sigma_y2 + c2))
-    return float(ssim_val)
+    ssim_map = ((2 * mu_xy + c1) * (2 * sigma_xy + c2)) / \
+               ((mu_x_sq + mu_y_sq + c1) * (sigma_x2 + sigma_y2 + c2))
+
+    if body_mask is not None:
+        return float(np.mean(ssim_map[body_mask == 1]))
+    return float(np.mean(ssim_map))
 
 
-def compute_rmse(predicted: np.ndarray, target: np.ndarray) -> float:
+def compute_rmse(predicted: np.ndarray, target: np.ndarray, body_mask: Optional[np.ndarray] = None) -> float:
     """Root Mean Squared Error."""
+    if body_mask is not None:
+        return float(np.sqrt(np.mean((predicted[body_mask == 1] - target[body_mask == 1]) ** 2)))
     return float(np.sqrt(np.mean((predicted - target) ** 2)))
 
 
-def compute_mae(predicted: np.ndarray, target: np.ndarray) -> float:
+def compute_mae(predicted: np.ndarray, target: np.ndarray, body_mask: Optional[np.ndarray] = None) -> float:
     """Mean Absolute Error."""
+    if body_mask is not None:
+        return float(np.mean(np.abs(predicted[body_mask == 1] - target[body_mask == 1])))
     return float(np.mean(np.abs(predicted - target)))
 
 
@@ -99,6 +129,7 @@ def compute_2d_metrics(
     predicted: np.ndarray,
     target: np.ndarray,
     data_range: float = 2.0,
+    body_mask: Optional[np.ndarray] = None,
 ) -> Dict[str, float]:
     """
     Compute all 2D per-slice metrics.
@@ -107,15 +138,16 @@ def compute_2d_metrics(
         predicted: Predicted image (H, W).
         target: Ground truth image (H, W).
         data_range: Dynamic range.
+        body_mask: Optional boolean mask of the body region.
     
     Returns:
         Dict with PSNR, SSIM, RMSE, MAE.
     """
     return {
-        "psnr": compute_psnr(predicted, target, data_range),
-        "ssim": compute_ssim(predicted, target, data_range),
-        "rmse": compute_rmse(predicted, target),
-        "mae": compute_mae(predicted, target),
+        "psnr": compute_psnr(predicted, target, data_range, body_mask),
+        "ssim": compute_ssim(predicted, target, data_range, win_size=7, body_mask=body_mask),
+        "rmse": compute_rmse(predicted, target, body_mask),
+        "mae": compute_mae(predicted, target, body_mask),
     }
 
 
@@ -188,18 +220,19 @@ def compute_flickering_index(
     # Compute inter-slice differences
     pred_diffs = []
     target_diffs = []
+    fi_per_pair = []
     
     for z in range(n_slices - 1):
-        pred_diff = np.mean(np.abs(pred_volume[z + 1] - pred_volume[z]))
-        target_diff = np.mean(np.abs(target_volume[z + 1] - target_volume[z]))
-        pred_diffs.append(pred_diff)
-        target_diffs.append(target_diff)
+        temporal_diff_pred = pred_volume[z + 1] - pred_volume[z]
+        temporal_diff_target = target_volume[z + 1] - target_volume[z]
+
+        pred_diffs.append(np.mean(np.abs(temporal_diff_pred)))
+        target_diffs.append(np.mean(np.abs(temporal_diff_target)))
+        fi_per_pair.append(np.mean(np.abs(temporal_diff_pred - temporal_diff_target)))
     
     pred_diffs = np.array(pred_diffs)
     target_diffs = np.array(target_diffs)
-    
-    # Flickering index: excess inter-slice variation vs target
-    fi_per_pair = pred_diffs - target_diffs
+    fi_per_pair = np.array(fi_per_pair)
     
     return {
         "flickering_index": float(np.mean(fi_per_pair)),
