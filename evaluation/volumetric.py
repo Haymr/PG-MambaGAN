@@ -159,7 +159,7 @@ class VolumeAssembler:
     
     def _denormalize_to_hu(self, image: np.ndarray) -> np.ndarray:
         """Convert [-1, 1] → HU values."""
-        return (image + 1.0) / 2.0 * (self.hu_max - self.hu_min) + self.hu_min
+        return np.clip((image + 1.0) / 2.0 * (self.hu_max - self.hu_min) + self.hu_min, self.hu_min, self.hu_max)
     
     @torch.no_grad()
     def assemble_patient(

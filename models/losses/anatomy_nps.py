@@ -201,7 +201,7 @@ class AnatomyAwareNPSLoss(nn.Module):
         Inverse of: norm = (hu - hu_min) / (hu_max - hu_min) * 2 - 1
         Therefore:  hu = (norm + 1) / 2 * (hu_max - hu_min) + hu_min
         """
-        return (x + 1.0) / 2.0 * (self.hu_max - self.hu_min) + self.hu_min
+        return torch.clamp((x + 1.0) / 2.0 * (self.hu_max - self.hu_min) + self.hu_min, min=self.hu_min, max=self.hu_max)
     
     # ------------------------------------------------------------------
     # Step 2-3: Create tissue masks from NDCT (DETACHED)
@@ -253,6 +253,50 @@ class AnatomyAwareNPSLoss(nn.Module):
     # Step 4: Extract masked patches
     # ------------------------------------------------------------------
     
+    def _extract_paired_patches(
+        self,
+        pred_image: torch.Tensor,
+        ndct_image: torch.Tensor,
+        mask: torch.Tensor,
+    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+        B, _, H, W = pred_image.shape
+        ps = self.patch_size
+
+        all_pred_patches = []
+        all_ndct_patches = []
+
+        for b in range(B):
+            pred_b = pred_image[b, 0]
+            ndct_b = ndct_image[b, 0]
+            mask_b = mask[b, 0]
+
+            if mask_b.sum() < ps * ps:
+                continue
+
+            valid_positions = []
+            stride = ps // 2
+            for y in range(0, H - ps + 1, stride):
+                for x in range(0, W - ps + 1, stride):
+                    patch_mask = mask_b[y:y + ps, x:x + ps]
+                    if patch_mask.mean().item() >= 0.75:
+                        valid_positions.append((y, x))
+
+            if not valid_positions:
+                continue
+
+            n = min(self.n_patches, len(valid_positions))
+            indices = torch.randperm(len(valid_positions))[:n]
+
+            for idx in indices:
+                y, x = valid_positions[idx]
+                all_pred_patches.append(pred_b[y:y + ps, x:x + ps])
+                all_ndct_patches.append(ndct_b[y:y + ps, x:x + ps])
+
+        if not all_pred_patches:
+            return None, None
+
+        return torch.stack(all_pred_patches), torch.stack(all_ndct_patches)
+
     def _extract_masked_patches(
         self,
         image: torch.Tensor,
@@ -399,6 +443,12 @@ class AnatomyAwareNPSLoss(nn.Module):
                 - Total weighted NPS loss (scalar tensor, differentiable).
                 - Dict of per-tissue NPS losses (for logging).
         """
+        import torchvision.transforms.functional as TF
+
+        # Differentiable residual noise extraction on full tensors
+        pred_noise_full = predicted - TF.gaussian_blur(predicted, kernel_size=5, sigma=1.0)
+        ndct_noise_full = ndct - TF.gaussian_blur(ndct, kernel_size=5, sigma=1.0)
+
         # ██ Step 1-3: Create tissue masks from NDCT ONLY (detached) ██
         tissue_masks = self._create_tissue_masks(ndct)
         
@@ -411,11 +461,10 @@ class AnatomyAwareNPSLoss(nn.Module):
             if weight == 0.0:
                 continue
             
-            # ██ Step 4: Apply SAME mask to BOTH ndct and predicted ██
-            # mask is detached — no gradient flows through the mask itself
-            # but gradient DOES flow through predicted * mask (element-wise)
-            pred_patches = self._extract_masked_patches(predicted, mask)
-            ndct_patches = self._extract_masked_patches(ndct, mask)
+            # Apply SAME mask to BOTH ndct and predicted simultaneously
+            pred_patches, ndct_patches = self._extract_paired_patches(
+                pred_noise_full, ndct_noise_full, mask
+            )
             
             if pred_patches is None or ndct_patches is None:
                 tissue_losses[tissue_name] = 0.0

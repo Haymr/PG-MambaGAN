@@ -44,6 +44,7 @@ class FrequencyLoss(nn.Module):
     
     def _compute_fft_magnitude(self, x: torch.Tensor) -> torch.Tensor:
         """Compute centered FFT magnitude spectrum."""
+        x = x - x.mean(dim=(-2, -1), keepdim=True)
         fft = torch.fft.fft2(x)
         fft_shifted = torch.fft.fftshift(fft)
         magnitude = torch.abs(fft_shifted)

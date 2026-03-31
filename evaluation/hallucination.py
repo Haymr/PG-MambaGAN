@@ -58,6 +58,8 @@ DEFAULT_RADIOMICS_PARAMS = {
         "interpolator": "sitkBSpline",
         "normalize": False,
         "normalizeScale": 1,
+        "force2D": True,
+        "force2Ddimension": 0,
     },
 }
 
@@ -121,7 +123,7 @@ class HallucinationAnalyzer:
     
     def _denormalize(self, image: np.ndarray) -> np.ndarray:
         """Convert [-1, 1] → HU."""
-        return (image + 1.0) / 2.0 * (self.hu_max - self.hu_min) + self.hu_min
+        return np.clip((image + 1.0) / 2.0 * (self.hu_max - self.hu_min) + self.hu_min, self.hu_min, self.hu_max)
     
     def _numpy_to_sitk(
         self, image: np.ndarray, is_mask: bool = False
@@ -222,9 +224,10 @@ class HallucinationAnalyzer:
         }
         
         # Basic entropy estimate
-        hist, _ = np.histogram(masked, bins=64, density=True)
+        hist, _ = np.histogram(masked, bins=64, density=False)
+        hist = hist.astype(float) / np.sum(hist)
         hist = hist[hist > 0]
-        features["firstorder_Entropy"] = float(-np.sum(hist * np.log2(hist + 1e-10)))
+        features["firstorder_Entropy"] = float(-np.sum(hist * np.log2(hist)))
         
         return features
     
