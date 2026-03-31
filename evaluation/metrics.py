@@ -174,7 +174,10 @@ def compute_3d_ssim(
     ssim_values = []
     
     for i in range(n_slices):
-        s = compute_ssim(pred_volume[i], target_volume[i], data_range)
+        # Denormalize target to HU to generate the mask
+        target_hu = (target_volume[i] + 1.0) / 2.0 * 2000.0 - 1000.0
+        mask = get_body_mask(target_hu)
+        s = compute_ssim(pred_volume[i], target_volume[i], data_range, win_size=11, body_mask=mask)
         ssim_values.append(s)
     
     ssim_arr = np.array(ssim_values)
@@ -253,7 +256,9 @@ def compute_3d_psnr(
     psnr_values = []
     
     for i in range(n_slices):
-        p = compute_psnr(pred_volume[i], target_volume[i], data_range)
+        target_hu = (target_volume[i] + 1.0) / 2.0 * 2000.0 - 1000.0
+        mask = get_body_mask(target_hu)
+        p = compute_psnr(pred_volume[i], target_volume[i], data_range, body_mask=mask)
         psnr_values.append(p)
     
     psnr_arr = np.array(psnr_values)
@@ -297,8 +302,10 @@ def compute_volumetric_metrics(
     coronal_ssim = []
     coronal_psnr = []
     for i in range(pred_coronal.shape[0]):
-        coronal_ssim.append(compute_ssim(pred_coronal[i], target_coronal[i], data_range))
-        coronal_psnr.append(compute_psnr(pred_coronal[i], target_coronal[i], data_range))
+        target_hu = (target_coronal[i] + 1.0) / 2.0 * 2000.0 - 1000.0
+        mask = get_body_mask(target_hu)
+        coronal_ssim.append(compute_ssim(pred_coronal[i], target_coronal[i], data_range, win_size=11, body_mask=mask))
+        coronal_psnr.append(compute_psnr(pred_coronal[i], target_coronal[i], data_range, body_mask=mask))
     results["coronal_ssim_mean"] = float(np.mean(coronal_ssim))
     results["coronal_psnr_mean"] = float(np.mean(coronal_psnr))
 
@@ -308,8 +315,10 @@ def compute_volumetric_metrics(
     sagittal_ssim = []
     sagittal_psnr = []
     for i in range(pred_sagittal.shape[0]):
-        sagittal_ssim.append(compute_ssim(pred_sagittal[i], target_sagittal[i], data_range))
-        sagittal_psnr.append(compute_psnr(pred_sagittal[i], target_sagittal[i], data_range))
+        target_hu = (target_sagittal[i] + 1.0) / 2.0 * 2000.0 - 1000.0
+        mask = get_body_mask(target_hu)
+        sagittal_ssim.append(compute_ssim(pred_sagittal[i], target_sagittal[i], data_range, win_size=11, body_mask=mask))
+        sagittal_psnr.append(compute_psnr(pred_sagittal[i], target_sagittal[i], data_range, body_mask=mask))
     results["sagittal_ssim_mean"] = float(np.mean(sagittal_ssim))
     results["sagittal_psnr_mean"] = float(np.mean(sagittal_psnr))
 
