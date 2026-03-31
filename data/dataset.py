@@ -106,10 +106,19 @@ class LDCTDataset(Dataset):
         if ndct.ndim == 3:
             ndct = ndct[:, :, 0] if ndct.shape[-1] == 1 else ndct[0]
         
+        # Explicitly clip to [-1000, 1000] and normalize to [-1.0, 1.0]
+        ldct = np.clip(ldct, -1000.0, 1000.0)
+        ndct = np.clip(ndct, -1000.0, 1000.0)
+        ldct = (ldct + 1000.0) / 2000.0 * 2.0 - 1.0
+        ndct = (ndct + 1000.0) / 2000.0 * 2.0 - 1.0
+
         # Apply augmentations
         if self.augment:
             ldct, ndct = self._augment(ldct, ndct)
         
+        ldct = np.ascontiguousarray(ldct)
+        ndct = np.ascontiguousarray(ndct)
+
         # Convert to tensors: (H, W) → (1, H, W)
         ldct_tensor = torch.from_numpy(ldct).unsqueeze(0)
         ndct_tensor = torch.from_numpy(ndct).unsqueeze(0)
@@ -141,19 +150,19 @@ class LDCTDataset(Dataset):
         """
         # Horizontal flip
         if np.random.random() > 0.5:
-            ldct = np.flip(ldct, axis=1).copy()
-            ndct = np.flip(ndct, axis=1).copy()
+            ldct = np.flip(ldct, axis=1)
+            ndct = np.flip(ndct, axis=1)
         
         # Vertical flip
         if np.random.random() > 0.5:
-            ldct = np.flip(ldct, axis=0).copy()
-            ndct = np.flip(ndct, axis=0).copy()
+            ldct = np.flip(ldct, axis=0)
+            ndct = np.flip(ndct, axis=0)
         
         # Random 90° rotation
         if np.random.random() > 0.5:
             k = np.random.choice([1, 2, 3])
-            ldct = np.rot90(ldct, k=k).copy()
-            ndct = np.rot90(ndct, k=k).copy()
+            ldct = np.rot90(ldct, k=k)
+            ndct = np.rot90(ndct, k=k)
         
         return ldct, ndct
     

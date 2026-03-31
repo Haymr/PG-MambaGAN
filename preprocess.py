@@ -235,6 +235,10 @@ def process_mayo(
                 low_hu = dicom_to_hu(low_dcm)
                 high_hu = dicom_to_hu(high_dcm)
                 
+                # Clip extreme values before resizing
+                low_hu = np.clip(low_hu, hu_min, hu_max)
+                high_hu = np.clip(high_hu, hu_min, hu_max)
+
                 # Resize
                 low_img = resize_image(low_hu, img_size)
                 high_img = resize_image(high_hu, img_size)
@@ -356,6 +360,9 @@ def process_phantomx(
                 low_hu = dicom_to_hu(low_dcm)
                 high_hu = dicom_to_hu(high_dcm)
                 
+                low_hu = np.clip(low_hu, hu_min, hu_max)
+                high_hu = np.clip(high_hu, hu_min, hu_max)
+
                 low_img = resize_image(low_hu, img_size)
                 high_img = resize_image(high_hu, img_size)
                 
