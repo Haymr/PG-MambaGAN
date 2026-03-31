@@ -24,6 +24,32 @@ try:
 except ImportError:
     SKIMAGE_AVAILABLE = False
 
+import scipy.ndimage as ndimage
+
+
+# ======================================================================
+# Body Contouring
+# ======================================================================
+
+def extract_body_contour(image: np.ndarray) -> np.ndarray:
+    """
+    Extract the robust body contour mask to isolate tissue and discard
+    the CT scanner bed and background noise.
+
+    Args:
+        image: CT image slice in [-1, 1].
+
+    Returns:
+        Boolean mask of the body contour.
+    """
+    mask = image > -0.95
+    labeled, num_features = ndimage.label(mask)
+    if num_features > 0:
+        sizes = np.bincount(labeled.ravel())
+        sizes[0] = 0  # ignore background
+        mask = labeled == sizes.argmax()
+    return ndimage.binary_fill_holes(mask)
+
 
 # ======================================================================
 # 2D Per-Slice Metrics
@@ -33,6 +59,7 @@ def compute_psnr(
     predicted: np.ndarray,
     target: np.ndarray,
     data_range: float = 2.0,
+    mask: Optional[np.ndarray] = None,
 ) -> float:
     """
     Compute Peak Signal-to-Noise Ratio.
@@ -41,7 +68,14 @@ def compute_psnr(
         predicted: Predicted image (H, W) in [-1, 1].
         target: Ground truth image (H, W) in [-1, 1].
         data_range: Dynamic range (2.0 for [-1, 1]).
+        mask: Optional boolean mask specifying region to compute PSNR over.
     """
+    if mask is not None:
+        mse = np.mean((predicted[mask] - target[mask]) ** 2)
+        if mse == 0:
+            return float("inf")
+        return float(10 * np.log10(data_range ** 2 / mse))
+
     if SKIMAGE_AVAILABLE:
         return float(_psnr(target, predicted, data_range=data_range))
     
@@ -56,6 +90,7 @@ def compute_ssim(
     target: np.ndarray,
     data_range: float = 2.0,
     win_size: int = 7,
+    mask: Optional[np.ndarray] = None,
 ) -> float:
     """
     Compute Structural Similarity Index.
@@ -65,8 +100,13 @@ def compute_ssim(
         target: Ground truth image (H, W) in [-1, 1].
         data_range: Dynamic range (2.0 for [-1, 1]).
         win_size: SSIM window size (must be odd, ≤ image dim).
+        mask: Optional boolean mask specifying region to compute SSIM over.
     """
     if SKIMAGE_AVAILABLE:
+        if mask is not None:
+            score, ssim_map = _ssim(target, predicted, data_range=data_range,
+                                    win_size=win_size, full=True)
+            return float(ssim_map[mask].mean())
         return float(_ssim(target, predicted, data_range=data_range,
                           win_size=win_size))
     
@@ -111,9 +151,11 @@ def compute_2d_metrics(
     Returns:
         Dict with PSNR, SSIM, RMSE, MAE.
     """
+    mask = extract_body_contour(target)
+
     return {
-        "psnr": compute_psnr(predicted, target, data_range),
-        "ssim": compute_ssim(predicted, target, data_range),
+        "psnr": compute_psnr(predicted, target, data_range, mask=mask),
+        "ssim": compute_ssim(predicted, target, data_range, mask=mask),
         "rmse": compute_rmse(predicted, target),
         "mae": compute_mae(predicted, target),
     }
@@ -142,7 +184,8 @@ def compute_3d_ssim(
     ssim_values = []
     
     for i in range(n_slices):
-        s = compute_ssim(pred_volume[i], target_volume[i], data_range)
+        mask = extract_body_contour(target_volume[i])
+        s = compute_ssim(pred_volume[i], target_volume[i], data_range, mask=mask)
         ssim_values.append(s)
     
     ssim_arr = np.array(ssim_values)
@@ -220,7 +263,8 @@ def compute_3d_psnr(
     psnr_values = []
     
     for i in range(n_slices):
-        p = compute_psnr(pred_volume[i], target_volume[i], data_range)
+        mask = extract_body_contour(target_volume[i])
+        p = compute_psnr(pred_volume[i], target_volume[i], data_range, mask=mask)
         psnr_values.append(p)
     
     psnr_arr = np.array(psnr_values)
