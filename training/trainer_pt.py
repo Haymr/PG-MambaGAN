@@ -322,6 +322,8 @@ class Trainer:
         """Run validation using EMA generator."""
         self.G_ema.eval()
         
+        from evaluation.metrics import get_body_mask, compute_psnr
+
         total_l1 = 0.0
         total_psnr = 0.0
         n_samples = 0
@@ -335,20 +337,34 @@ class Trainer:
             ):
                 fake = self.G_ema(ldct)
             
-            # L1
-            total_l1 += nn.functional.l1_loss(fake, ndct).item() * ldct.shape[0]
+            # Convert to numpy for metrics
+            fake_np = fake.cpu().numpy()
+            ndct_np = ndct.cpu().numpy()
             
-            # PSNR (on [-1,1] range)
-            mse = nn.functional.mse_loss(fake, ndct).item()
-            if mse > 0:
-                psnr = 10 * torch.log10(torch.tensor(4.0 / mse)).item()  # range=2 for [-1,1]
-                total_psnr += psnr * ldct.shape[0]
+            batch_l1 = 0.0
+            batch_psnr = 0.0
             
+            for i in range(ldct.shape[0]):
+                # HU Denormalization for mask generation (assuming [-1, 1] -> [-1000, 1000])
+                target_hu = (ndct_np[i, 0] + 1.0) / 2.0 * 2000.0 - 1000.0
+                body_mask = get_body_mask(target_hu)
+
+                # Masked L1
+                if body_mask.sum() > 0:
+                    l1_val = np.mean(np.abs(fake_np[i, 0][body_mask == 1] - ndct_np[i, 0][body_mask == 1]))
+                    batch_l1 += l1_val
+
+                # Masked PSNR
+                psnr_val = compute_psnr(fake_np[i, 0], ndct_np[i, 0], data_range=2.0, body_mask=body_mask)
+                batch_psnr += psnr_val
+
+            total_l1 += batch_l1
+            total_psnr += batch_psnr
             n_samples += ldct.shape[0]
         
         return {
-            "val_l1": total_l1 / max(n_samples, 1),
-            "val_psnr": total_psnr / max(n_samples, 1),
+            "val_l1": float(total_l1 / max(n_samples, 1)),
+            "val_psnr": float(total_psnr / max(n_samples, 1)),
         }
     
     # ------------------------------------------------------------------

@@ -399,6 +399,12 @@ class AnatomyAwareNPSLoss(nn.Module):
                 - Total weighted NPS loss (scalar tensor, differentiable).
                 - Dict of per-tissue NPS losses (for logging).
         """
+        import torchvision.transforms.functional as TF
+
+        # Differentiable residual noise extraction on full tensors
+        pred_noise_full = predicted - TF.gaussian_blur(predicted, kernel_size=5, sigma=1.0)
+        ndct_noise_full = ndct - TF.gaussian_blur(ndct, kernel_size=5, sigma=1.0)
+
         # ██ Step 1-3: Create tissue masks from NDCT ONLY (detached) ██
         tissue_masks = self._create_tissue_masks(ndct)
         
@@ -414,21 +420,16 @@ class AnatomyAwareNPSLoss(nn.Module):
             # ██ Step 4: Apply SAME mask to BOTH ndct and predicted ██
             # mask is detached — no gradient flows through the mask itself
             # but gradient DOES flow through predicted * mask (element-wise)
-            pred_patches = self._extract_masked_patches(predicted, mask)
-            ndct_patches = self._extract_masked_patches(ndct, mask)
+            pred_patches = self._extract_masked_patches(pred_noise_full, mask)
+            ndct_patches = self._extract_masked_patches(ndct_noise_full, mask)
             
             if pred_patches is None or ndct_patches is None:
                 tissue_losses[tissue_name] = 0.0
                 continue
             
-            import torchvision.transforms.functional as TF
-            # Differentiable residual noise extraction
-            pred_noise_patches = pred_patches - TF.gaussian_blur(pred_patches, kernel_size=5, sigma=1.0)
-            ndct_noise_patches = ndct_patches - TF.gaussian_blur(ndct_patches, kernel_size=5, sigma=1.0)
-
             # ██ Step 5: Compute NPS for both ██
-            nps_pred = self._compute_nps(pred_noise_patches)
-            nps_ndct = self._compute_nps(ndct_noise_patches)
+            nps_pred = self._compute_nps(pred_patches)
+            nps_ndct = self._compute_nps(ndct_patches)
             
             # ██ Step 6: Weighted L2 loss between NPS curves ██
             nps_diff = F.mse_loss(nps_pred, nps_ndct)
