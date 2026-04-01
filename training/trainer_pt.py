@@ -178,9 +178,14 @@ class Trainer:
     
     @torch.no_grad()
     def _update_ema(self):
-        """Update EMA generator weights."""
+        """Update EMA generator weights and synchronize buffers."""
+        # 1. Update weights (EMA)
         for p_ema, p in zip(self.G_ema.parameters(), self.G.parameters()):
             p_ema.data.mul_(self.ema_decay).add_(p.data, alpha=1 - self.ema_decay)
+            
+        # 2. Synchronize buffers (Exact copy)
+        for b_ema, b in zip(self.G_ema.buffers(), self.G.buffers()):
+            b_ema.data.copy_(b.data)
     
     # ------------------------------------------------------------------
     # Single Discriminator Step
@@ -405,6 +410,10 @@ class Trainer:
             for step, batch in enumerate(pbar):
                 ldct = batch["ldct"].to(self.device, non_blocking=True)
                 ndct = batch["ndct"].to(self.device, non_blocking=True)
+                
+                # ⚠️ CRITICAL VRAM FIX: If gradient_checkpointing is True, the input tensor 
+                # MUST require grad, otherwise checkpointing silently disables backprop for early layers.
+                ldct.requires_grad_(True)
                 
                 # ---- Discriminator ----
                 d_losses = self._train_discriminator(ldct, ndct)
