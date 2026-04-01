@@ -274,9 +274,9 @@ PG-MambaGAN implements three VRAM management strategies to enable
 
 The evaluation pipeline produces four categories of evidence:
 
-1. **2D Per-Slice**: PSNR, SSIM, RMSE, MAE
-2. **3D Volumetric**: 3D-SSIM, 3D-PSNR, **Flickering Index** (z-axis continuity)
-3. **Hallucination Risk**: Radiomic feature preservation (First Order, GLCM, GLRLM)
+1. **2D Per-Slice**: PSNR, SSIM, RMSE, MAE (computed with body contouring masks to prevent background air inflation)
+2. **3D Volumetric**: Multi-planar (Axial, Coronal, Sagittal) 3D-SSIM/3D-PSNR, plus **Flickering Index** (z-axis continuity)
+3. **Hallucination Risk**: Radiomic feature preservation (First Order, forced 2D-GLCM, GLRLM)
 4. **Clinical Validity**: Edge Preservation Index (EPI), Contrast-to-Noise Ratio (CNR)
 
 All 3D volumes are exported as NIfTI (`.nii.gz`) with DICOM-derived affine matrices
