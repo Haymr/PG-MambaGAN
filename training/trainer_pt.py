@@ -310,6 +310,7 @@ class Trainer:
         from evaluation.metrics import get_body_mask, compute_psnr
 
         total_l1 = 0.0
+        total_l1_hu = 0.0
         total_psnr = 0.0
         n_samples = 0
         
@@ -327,28 +328,36 @@ class Trainer:
             ndct_np = ndct.cpu().numpy()
             
             batch_l1 = 0.0
+            batch_l1_hu = 0.0
             batch_psnr = 0.0
             
             for i in range(ldct.shape[0]):
                 # HU Denormalization for mask generation (assuming [-1, 1] -> [-1000, 1000])
                 target_hu = (ndct_np[i, 0] + 1.0) / 2.0 * 2000.0 - 1000.0
+                pred_hu = (fake_np[i, 0] + 1.0) / 2.0 * 2000.0 - 1000.0
+                
                 body_mask = get_body_mask(target_hu)
 
                 # Masked L1
                 if body_mask.sum() > 0:
                     l1_val = np.mean(np.abs(fake_np[i, 0][body_mask == 1] - ndct_np[i, 0][body_mask == 1]))
                     batch_l1 += l1_val
+                    
+                    l1_val_hu = np.mean(np.abs(pred_hu[body_mask == 1] - target_hu[body_mask == 1]))
+                    batch_l1_hu += l1_val_hu
 
                 # Masked PSNR
                 psnr_val = compute_psnr(fake_np[i, 0], ndct_np[i, 0], data_range=2.0, body_mask=body_mask)
                 batch_psnr += psnr_val
 
             total_l1 += batch_l1
+            total_l1_hu += batch_l1_hu
             total_psnr += batch_psnr
             n_samples += ldct.shape[0]
         
         return {
             "val_l1": float(total_l1 / max(n_samples, 1)),
+            "val_l1_hu": float(total_l1_hu / max(n_samples, 1)),
             "val_psnr": float(total_psnr / max(n_samples, 1)),
         }
     
@@ -481,7 +490,7 @@ class Trainer:
             # Checkpointing
             self._save_checkpoint(epoch, val_metrics)
         
-        print(f"\n✅ Training complete! Best val_l1: {self.best_val_loss:.6f}")
+        print(f"\n✅ Training complete! Best val_l1_hu: {self.best_val_loss:.1f} HU")
         
         if self.wandb_run:
             import wandb
@@ -524,6 +533,7 @@ class Trainer:
         
         if val_metrics:
             print(f"  Val: L1={val_metrics.get('val_l1',0):.4f} "
+                  f"L1_HU={val_metrics.get('val_l1_hu',0):.1f} HU "
                   f"PSNR={val_metrics.get('val_psnr',0):.2f} dB")
         
         # VRAM
@@ -611,11 +621,11 @@ class Trainer:
             torch.save(ckpt, ckpt_dir / f"epoch_{epoch+1:04d}.pth")
         
         # Best
-        val_l1 = val_metrics.get("val_l1", float("inf"))
-        if val_l1 < self.best_val_loss:
-            self.best_val_loss = val_l1
+        val_l1_hu = val_metrics.get("val_l1_hu", float("inf"))
+        if val_l1_hu < self.best_val_loss:
+            self.best_val_loss = val_l1_hu
             torch.save(ckpt, ckpt_dir / "best.pth")
-            print(f"  ★ New best model saved (val_l1={val_l1:.6f})")
+            print(f"  ★ New best model saved (val_l1_hu={val_l1_hu:.1f} HU)")
     
     def load_checkpoint(self, path: str):
         """Resume training from a checkpoint."""
