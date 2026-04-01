@@ -193,49 +193,41 @@ class Trainer:
         self.D.train()
         d_losses = {"d_real": 0, "d_fake": 0, "d_gp": 0, "d_total": 0}
         
-        self.opt_D.zero_grad()
-        
-        for accum_step in range(self.grad_accum):
-            with torch.amp.autocast(
-                device_type="cuda", dtype=self.amp_dtype, enabled=self.use_amp
-            ):
-                # Generate fake
-                with torch.no_grad():
-                    fake = self.G(ldct)
-                
-                # Real score
-                real_input = torch.cat([ldct, ndct], dim=1)
-                d_real = self.D(real_input)
-                
-                # Fake score
-                fake_input = torch.cat([ldct, fake.detach()], dim=1)
-                d_fake = self.D(fake_input)
-                
-                # Wasserstein loss
-                d_loss = wasserstein_d_loss(d_real, d_fake)
+        with torch.amp.autocast(
+            device_type="cuda", dtype=self.amp_dtype, enabled=self.use_amp
+        ):
+            # Generate fake
+            with torch.no_grad():
+                fake = self.G(ldct)
             
-            # Gradient penalty (computed outside AMP for stability)
-            gp = gradient_penalty(
-                self.D, ndct, fake.detach(), ldct, self.lambda_gp
-            )
+            # Real score
+            real_input = torch.cat([ldct, ndct], dim=1)
+            d_real = self.D(real_input)
             
-            total_d_loss = (d_loss + gp) / self.grad_accum
+            # Fake score
+            fake_input = torch.cat([ldct, fake.detach()], dim=1)
+            d_fake = self.D(fake_input)
             
-            if self.use_amp and self.amp_dtype == torch.float16:
-                self.scaler_D.scale(total_d_loss).backward()
-            else:
-                total_d_loss.backward()
-            
-            d_losses["d_real"] += d_real.mean().item() / self.grad_accum
-            d_losses["d_fake"] += d_fake.mean().item() / self.grad_accum
-            d_losses["d_gp"] += gp.item() / self.grad_accum
-            d_losses["d_total"] += total_d_loss.item()
+            # Wasserstein loss
+            d_loss = wasserstein_d_loss(d_real, d_fake)
+
+        # Gradient penalty (computed outside AMP for stability)
+        # Note: Casting to float() for mixed precision stability
+        gp = gradient_penalty(
+            self.D, ndct.float(), fake.detach().float(), ldct.float(), self.lambda_gp
+        )
+
+        total_d_loss = (d_loss + gp) / self.grad_accum
         
         if self.use_amp and self.amp_dtype == torch.float16:
-            self.scaler_D.step(self.opt_D)
-            self.scaler_D.update()
+            self.scaler_D.scale(total_d_loss).backward()
         else:
-            self.opt_D.step()
+            total_d_loss.backward()
+
+        d_losses["d_real"] = d_real.mean().item() / self.grad_accum
+        d_losses["d_fake"] = d_fake.mean().item() / self.grad_accum
+        d_losses["d_gp"] = gp.item() / self.grad_accum
+        d_losses["d_total"] = total_d_loss.item()
         
         return d_losses
     
@@ -250,66 +242,54 @@ class Trainer:
         self.G.train()
         g_losses = {}
         
-        self.opt_G.zero_grad()
-        
-        for accum_step in range(self.grad_accum):
-            with torch.amp.autocast(
-                device_type="cuda", dtype=self.amp_dtype, enabled=self.use_amp
-            ):
-                # Generate
-                fake = self.G(ldct)
-                
-                # Adversarial loss
-                fake_input = torch.cat([ldct, fake], dim=1)
-                d_fake = self.D(fake_input)
-                loss_adv = wasserstein_g_loss(d_fake) * self.loss_weights["adv"]
-                
-                total_g_loss = loss_adv
-                g_losses["g_adv"] = g_losses.get("g_adv", 0) + loss_adv.item() / self.grad_accum
-                
-                # L1
-                if "l1" in self.g_loss_fns:
-                    loss_l1 = self.g_loss_fns["l1"](fake, ndct) * self.loss_weights["l1"]
-                    total_g_loss = total_g_loss + loss_l1
-                    g_losses["g_l1"] = g_losses.get("g_l1", 0) + loss_l1.item() / self.grad_accum
-                
-                # Perceptual
-                if "perceptual" in self.g_loss_fns:
-                    loss_perc = self.g_loss_fns["perceptual"](fake, ndct) * self.loss_weights["perceptual"]
-                    total_g_loss = total_g_loss + loss_perc
-                    g_losses["g_perc"] = g_losses.get("g_perc", 0) + loss_perc.item() / self.grad_accum
-                
+        with torch.amp.autocast(
+            device_type="cuda", dtype=self.amp_dtype, enabled=self.use_amp
+        ):
+            # Generate
+            fake = self.G(ldct)
             
-            # Frequency loss (outside AMP — uses FFT which may not support bfloat16)
-            if "freq" in self.g_loss_fns:
-                loss_freq = self.g_loss_fns["freq"](fake.float(), ndct.float()) * self.loss_weights["freq"]
-                total_g_loss = total_g_loss.float() + loss_freq
-                g_losses["g_freq"] = g_losses.get("g_freq", 0) + loss_freq.item() / self.grad_accum
+            # Adversarial loss
+            fake_input = torch.cat([ldct, fake], dim=1)
+            d_fake = self.D(fake_input)
+            loss_adv = wasserstein_g_loss(d_fake) * self.loss_weights["adv"]
+            
+            total_g_loss = loss_adv
+            g_losses["g_adv"] = loss_adv.item() / self.grad_accum
+            
+            # L1
+            if "l1" in self.g_loss_fns:
+                loss_l1 = self.g_loss_fns["l1"](fake, ndct) * self.loss_weights["l1"]
+                total_g_loss = total_g_loss + loss_l1
+                g_losses["g_l1"] = loss_l1.item() / self.grad_accum
+            
+            # Perceptual
+            if "perceptual" in self.g_loss_fns:
+                loss_perc = self.g_loss_fns["perceptual"](fake, ndct) * self.loss_weights["perceptual"]
+                total_g_loss = total_g_loss + loss_perc
+                g_losses["g_perc"] = loss_perc.item() / self.grad_accum
 
-            # NPS loss (outside AMP — uses FFT which may not support bfloat16)
-            if "nps" in self.g_loss_fns:
-                loss_nps, tissue_losses = self.g_loss_fns["nps"](fake.float(), ndct.float())
-                loss_nps = loss_nps * self.loss_weights["nps"]
-                total_g_loss = total_g_loss + loss_nps
-                g_losses["g_nps"] = g_losses.get("g_nps", 0) + loss_nps.item() / self.grad_accum
-            
-            scaled_loss = total_g_loss / self.grad_accum
-            
-            if self.use_amp and self.amp_dtype == torch.float16:
-                self.scaler_G.scale(scaled_loss).backward()
-            else:
-                scaled_loss.backward()
-            
-            g_losses["g_total"] = g_losses.get("g_total", 0) + scaled_loss.item()
+
+        # Frequency loss (outside AMP — uses FFT which may not support bfloat16)
+        if "freq" in self.g_loss_fns:
+            loss_freq = self.g_loss_fns["freq"](fake.float(), ndct.float()) * self.loss_weights["freq"]
+            total_g_loss = total_g_loss.float() + loss_freq
+            g_losses["g_freq"] = loss_freq.item() / self.grad_accum
+
+        # NPS loss (outside AMP — uses FFT which may not support bfloat16)
+        if "nps" in self.g_loss_fns:
+            loss_nps, tissue_losses = self.g_loss_fns["nps"](fake.float(), ndct.float())
+            loss_nps = loss_nps * self.loss_weights["nps"]
+            total_g_loss = total_g_loss + loss_nps
+            g_losses["g_nps"] = loss_nps.item() / self.grad_accum
+
+        scaled_loss = total_g_loss / self.grad_accum
         
         if self.use_amp and self.amp_dtype == torch.float16:
-            self.scaler_G.step(self.opt_G)
-            self.scaler_G.update()
+            self.scaler_G.scale(scaled_loss).backward()
         else:
-            self.opt_G.step()
+            scaled_loss.backward()
         
-        # Update EMA
-        self._update_ema()
+        g_losses["g_total"] = scaled_loss.item()
         
         return g_losses
     
@@ -398,7 +378,20 @@ class Trainer:
         print(f"  n-critic: {self.n_critic}")
         print(f"{'='*60}\n")
         
+        import math
         for epoch in range(self.start_epoch, self.epochs):
+            # Dynamic Loss Weighting (Cosine Decay)
+            # L1: 100.0 -> 10.0
+            # NPS: 5.0 -> 25.0
+            progress = epoch / max(1, self.epochs - 1)
+            cosine_factor = 0.5 * (1 + math.cos(math.pi * progress)) # 1.0 -> 0.0
+
+            current_l1 = 10.0 + (100.0 - 10.0) * cosine_factor
+            current_nps = 25.0 + (5.0 - 25.0) * cosine_factor
+
+            self.loss_weights["l1"] = current_l1
+            self.loss_weights["nps"] = current_nps
+
             epoch_start = time.time()
             epoch_d_losses = {}
             epoch_g_losses = {}
@@ -406,6 +399,9 @@ class Trainer:
             
             pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{self.epochs}")
             
+            self.opt_D.zero_grad()
+            self.opt_G.zero_grad()
+
             for step, batch in enumerate(pbar):
                 ldct = batch["ldct"].to(self.device, non_blocking=True)
                 ndct = batch["ndct"].to(self.device, non_blocking=True)
@@ -415,11 +411,30 @@ class Trainer:
                 for k, v in d_losses.items():
                     epoch_d_losses[k] = epoch_d_losses.get(k, 0) + v
                 
+                if (step + 1) % self.grad_accum == 0 or (step + 1) == len(train_loader):
+                    if self.use_amp and self.amp_dtype == torch.float16:
+                        self.scaler_D.step(self.opt_D)
+                        self.scaler_D.update()
+                    else:
+                        self.opt_D.step()
+                    self.opt_D.zero_grad()
+
                 # ---- Generator (every n_critic steps) ----
                 if (step + 1) % self.n_critic == 0:
                     g_losses = self._train_generator(ldct, ndct)
                     for k, v in g_losses.items():
                         epoch_g_losses[k] = epoch_g_losses.get(k, 0) + v
+
+                    if ((step + 1) // self.n_critic) % self.grad_accum == 0 or (step + 1) == len(train_loader):
+                        if self.use_amp and self.amp_dtype == torch.float16:
+                            self.scaler_G.step(self.opt_G)
+                            self.scaler_G.update()
+                        else:
+                            self.opt_G.step()
+                        self.opt_G.zero_grad()
+
+                        # Update EMA
+                        self._update_ema()
                 
                 self.global_step += 1
                 n_batches += 1
