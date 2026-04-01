@@ -53,7 +53,8 @@ LDCT (1, 512, 512)
 ```
 
 Each **VSS Block** performs 4-way 2D Selective Scan (SS2D) via `mamba-ssm`:
-- Raster scan (→↓), Reverse raster (←↑), Column scan (↓→), Reverse column (↑←)
+- Uses **Spatially Coherent Z-shaped Scanning** (Snake Scan) instead of default raster scans to preserve spatial continuity of non-linear medical structures.
+- Z-scan (→↓), Reverse Z-scan (←↑), Column Z-scan (↓→), Reverse Column Z-scan (↑←)
 - O(n) complexity vs O(n²) for self-attention
 
 ### Anatomy-Aware NPS Loss Pipeline
@@ -74,7 +75,7 @@ NDCT (Ground Truth)                    Predicted (Generator Output)
           ▼                                     │
   ┌─ Morphological Cleanup ───────────┐         │
   │  Closing (5×5) → Opening (3×3)    │         │
-  │  Min area filter (64² px)         │         │
+  │  Min area filter (256 px)         │         │
   └───────┬───────────────────────────┘         │
           ▼                                     │
    Tissue Masks (.detach())  ───────────┬───────┘
@@ -83,7 +84,7 @@ NDCT (Ground Truth)                    Predicted (Generator Output)
     NDCT ⊙ Mask                  Pred ⊙ Mask
           │                             │
           ▼                             ▼
-    NPS(NDCT)                    NPS(Pred)     ← 2D FFT → Radial Avg
+    NPS(NDCT)                    NPS(Pred)     ← Multi-Scale Pyramid + Hanning Window → 2D FFT → Radial Avg
           │                             │
           └──────── L₂ Loss ────────────┘
                       ×
@@ -305,13 +306,15 @@ Slices are sorted by **Z-coordinate** (not filename index) to handle Head-First/
 
 ## 📄 Total Loss Function
 
+```text
+L_total = λ_adv  · L_wasserstein      (1.0)                        — WGAN-GP adversarial
+        + λ_l1   · L_l1               (Cosine Decay: 100.0 → 10.0) — Pixel fidelity
+        + λ_perc · L_perceptual       (10.0)                       — VGG19 feature matching
+        + λ_nps  · L_anatomy_nps      (Cosine Warmup: 5.0 → 25.0)  — ★ Tissue-specific NPS
+        + λ_freq · L_frequency        (1.0)                        — Multi-scale FFT
 ```
-L_total = λ_adv  · L_wasserstein      (1.0)    — WGAN-GP adversarial
-        + λ_l1   · L_l1               (100.0)  — Pixel fidelity
-        + λ_perc · L_perceptual        (10.0)  — VGG19 feature matching
-        + λ_nps  · L_anatomy_nps       (5.0)   — ★ Tissue-specific NPS
-        + λ_freq · L_frequency          (1.0)  — Multi-scale FFT
-```
+
+> **Dynamic Loss Weighting:** To prevent simple L1 pixel loss from dominating the early training phase, the L1 weight dynamically decreases while the Anatomy-Aware NPS weight increases over time. This enables early-stage structural alignment followed by late-stage fine-grained tissue texture learning.
 
 ---
 
