@@ -63,10 +63,10 @@ class SS2D(nn.Module):
     processes each with the Mamba SSM kernel, then merges results.
     
     Scan directions:
-        1. Raster (left→right, top→bottom)
-        2. Reverse raster (right→left, bottom→top)
-        3. Column-wise (top→bottom, left→right)
-        4. Reverse column-wise (bottom→top, right→left)
+        1. Continuous Sweep (Z-shaped/Snake) Raster
+        2. Reverse Continuous Sweep Raster
+        3. Continuous Sweep (Z-shaped/Snake) Column-wise
+        4. Reverse Continuous Sweep Column-wise
     
     Args:
         dim: Number of input/output channels.
@@ -129,16 +129,20 @@ class SS2D(nn.Module):
         # (B, C, H, W) → (B, H, W, C) for sequence processing
         x_hwc = x.permute(0, 2, 3, 1)  # (B, H, W, C)
         
-        # Direction 1: Raster (row-major flatten)
-        seq_raster = x_hwc.reshape(B, H * W, C)
+        # Direction 1: Z-shaped / Snake Raster (flip odd rows)
+        x_raster = x_hwc.clone()
+        x_raster[:, 1::2, :, :] = torch.flip(x_raster[:, 1::2, :, :], dims=[2])
+        seq_raster = x_raster.reshape(B, H * W, C)
         
-        # Direction 2: Reverse raster
+        # Direction 2: Reverse Z-shaped Raster
         seq_reverse = torch.flip(seq_raster, dims=[1])
         
-        # Direction 3: Column-wise (transpose then flatten)
-        seq_column = x_hwc.permute(0, 2, 1, 3).reshape(B, H * W, C)
+        # Direction 3: Z-shaped Column-wise (transpose then flip odd columns)
+        x_col = x_hwc.permute(0, 2, 1, 3).clone()  # (B, W, H, C)
+        x_col[:, 1::2, :, :] = torch.flip(x_col[:, 1::2, :, :], dims=[2])
+        seq_column = x_col.reshape(B, H * W, C)
         
-        # Direction 4: Reverse column-wise
+        # Direction 4: Reverse Z-shaped Column-wise
         seq_col_rev = torch.flip(seq_column, dims=[1])
         
         return [seq_raster, seq_reverse, seq_column, seq_col_rev]
@@ -159,18 +163,27 @@ class SS2D(nn.Module):
         C = outputs[0].shape[2]
         
         # Reverse the scan transforms
-        # Dir 1: raster — already correct order
-        out_1 = outputs[0]  # (B, H*W, C)
+        # Dir 1: Z-shaped raster — reverse row flips
+        out_1 = outputs[0].reshape(B, H, W, C).clone()
+        out_1[:, 1::2, :, :] = torch.flip(out_1[:, 1::2, :, :], dims=[2])
+        out_1 = out_1.reshape(B, H * W, C)
         
-        # Dir 2: reverse raster — flip back
+        # Dir 2: Reverse Z-shaped raster — flip 1D back, then reverse row flips
         out_2 = torch.flip(outputs[1], dims=[1])
+        out_2 = out_2.reshape(B, H, W, C).clone()
+        out_2[:, 1::2, :, :] = torch.flip(out_2[:, 1::2, :, :], dims=[2])
+        out_2 = out_2.reshape(B, H * W, C)
         
-        # Dir 3: column-wise — transpose back
-        out_3 = outputs[2].reshape(B, W, H, C).permute(0, 2, 1, 3).reshape(B, H * W, C)
+        # Dir 3: Z-shaped column-wise — reverse col flips, then transpose back
+        out_3 = outputs[2].reshape(B, W, H, C).clone()
+        out_3[:, 1::2, :, :] = torch.flip(out_3[:, 1::2, :, :], dims=[2])
+        out_3 = out_3.permute(0, 2, 1, 3).reshape(B, H * W, C)
         
-        # Dir 4: reverse column-wise — flip then transpose back
-        out_4_flipped = torch.flip(outputs[3], dims=[1])
-        out_4 = out_4_flipped.reshape(B, W, H, C).permute(0, 2, 1, 3).reshape(B, H * W, C)
+        # Dir 4: Reverse Z-shaped column-wise — flip 1D, reverse col flips, transpose back
+        out_4 = torch.flip(outputs[3], dims=[1])
+        out_4 = out_4.reshape(B, W, H, C).clone()
+        out_4[:, 1::2, :, :] = torch.flip(out_4[:, 1::2, :, :], dims=[2])
+        out_4 = out_4.permute(0, 2, 1, 3).reshape(B, H * W, C)
         
         # Concatenate all directions: (B, H*W, 4*C)
         merged = torch.cat([out_1, out_2, out_3, out_4], dim=-1)
