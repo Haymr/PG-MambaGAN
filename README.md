@@ -75,7 +75,14 @@ NDCT (Ground Truth)                    Predicted (Generator Output)
           ▼                                     │
   ┌─ Morphological Cleanup ───────────┐         │
   │  Closing (5×5) → Opening (3×3)    │         │
-  │  Min area filter (256 px)         │         │
+  │  Min area filter (64 px)          │         │
+  └───────┬───────────────────────────┘         │
+          ▼                                     │
+  ┌─ AAPM TG-233 Homogeneity Filter ──┐         │
+  │  3x3 Sobel Gradient Magnitude     │         │
+  │  Fat (<0.02) | Soft (<0.04)       │         │
+  │  Lung (<0.08)                     │         │
+  │  *Reject patches with anatomy*    │         │
   └───────┬───────────────────────────┘         │
           ▼                                     │
    Tissue Masks (.detach())  ───────────┬───────┘
@@ -84,11 +91,11 @@ NDCT (Ground Truth)                    Predicted (Generator Output)
     NDCT ⊙ Mask                  Pred ⊙ Mask
           │                             │
           ▼                             ▼
-    NPS(NDCT)                    NPS(Pred)     ← Multi-Scale Pyramid + Hanning Window → 2D FFT → Radial Avg
+    NPS(NDCT)                    NPS(Pred)     ← Stride=ps + 1st-Order Plane Detrending → 2D FFT → Radial Avg
           │                             │
           └──────── L₂ Loss ────────────┘
                       ×
-              Tissue Weight (w_soft=2.0, w_lung=1.5, ...)
+              Tissue Weight (w_soft=2.0, w_lung=1.5, w_bone=0.0)
 ```
 
 ---
@@ -259,6 +266,8 @@ PG-MambaGAN implements three VRAM management strategies to enable
 
 > **Critical**: WGAN-GP's Gradient Penalty is computed **outside** the AMP autocast
 > scope in pure FP32 to prevent NaN from second-order gradient computation.
+> 
+> **Stability Core Fixes**: The PyTorch trainer overrides native `requires_grad` rules to prevent silent `gradient_checkpointing` graph disconnections (freezing), and explicitly synchronizes `G_ema` module buffers to prevent running metric validation drift across epochs.
 
 ### Recommended VRAM Configurations
 
@@ -276,6 +285,7 @@ PG-MambaGAN implements three VRAM management strategies to enable
 The evaluation pipeline produces four categories of evidence:
 
 1. **2D Per-Slice**: PSNR, SSIM, RMSE, MAE (computed with body contouring masks to prevent background air inflation)
+   *Note: MAE (L1) and Best Checkpoint saving dynamically use a dual-logging system (Normalized Space vs Physical Hounsfield Space) for direct clinical interpretability.*
 2. **3D Volumetric**: Multi-planar (Axial, Coronal, Sagittal) 3D-SSIM/3D-PSNR, plus **Flickering Index** (z-axis continuity)
 3. **Hallucination Risk**: Radiomic feature preservation (First Order, forced 2D-GLCM, GLRLM)
 4. **Clinical Validity**: Edge Preservation Index (EPI), Contrast-to-Noise Ratio (CNR)
