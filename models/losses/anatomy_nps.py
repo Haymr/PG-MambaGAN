@@ -102,7 +102,7 @@ def clean_mask(
     mask: torch.Tensor,
     close_kernel: int = 5,
     open_kernel: int = 3,
-    min_area: int = 256,  # 16² pixels
+    min_area: int = 64,  # Clinical microcalcifications (approx 5mm) are around 30-50 px
 ) -> torch.Tensor:
     """
     Full morphological cleanup pipeline.
@@ -177,7 +177,7 @@ class AnatomyAwareNPSLoss(nn.Module):
         n_patches: int = 8,
         close_kernel: int = 5,
         open_kernel: int = 3,
-        min_area: int = 256,
+        min_area: int = 64,
     ):
         super().__init__()
         
@@ -189,6 +189,18 @@ class AnatomyAwareNPSLoss(nn.Module):
         self.close_kernel = close_kernel
         self.open_kernel = open_kernel
         self.min_area = min_area
+        
+        # Precompute Pseudoinverse for 2D 2nd-order polynomial detrending
+        self.scales = [32, 64, 128]
+        for ps in self.scales:
+            y, x = torch.meshgrid(torch.linspace(-1, 1, ps), torch.linspace(-1, 1, ps), indexing="ij")
+            y_flat, x_flat = y.flatten(), x.flatten()
+            A = torch.stack([
+                torch.ones_like(x_flat), x_flat, y_flat, x_flat ** 2, y_flat ** 2, x_flat * y_flat
+            ], dim=1) # (ps*ps, 6)
+            A_pinv = torch.linalg.pinv(A) # (6, ps*ps)
+            self.register_buffer(f"A_{ps}", A)
+            self.register_buffer(f"A_pinv_{ps}", A_pinv)
     
     # ------------------------------------------------------------------
     # Step 1: Denormalize to HU space
@@ -288,7 +300,7 @@ class AnatomyAwareNPSLoss(nn.Module):
                     continue
 
                 n = min(self.n_patches, len(valid_positions))
-                indices = torch.randperm(len(valid_positions))[:n]
+                indices = torch.linspace(0, len(valid_positions) - 1, steps=n).long()
 
                 for idx in indices:
                     y, x = valid_positions[idx]
@@ -349,7 +361,7 @@ class AnatomyAwareNPSLoss(nn.Module):
             
             # Random sample from valid positions
             n = min(self.n_patches, len(valid_positions))
-            indices = torch.randperm(len(valid_positions))[:n]
+            indices = torch.linspace(0, len(valid_positions) - 1, steps=n).long()
             
             for idx in indices:
                 y, x = valid_positions[idx]
@@ -360,6 +372,27 @@ class AnatomyAwareNPSLoss(nn.Module):
             return None
         
         return torch.stack(all_patches)  # (N, ps, ps)
+
+    def _detrend_patches(self, patches: torch.Tensor, ps: int) -> torch.Tensor:
+        """
+        Detrends extracted patches by fitting and subtracting a 2nd-order polynomial surface,
+        effectively isolating quantum noise while preserving authentic structural variance.
+        """
+        N, ps_dim, _ = patches.shape
+        patches_flat = patches.view(N, -1) # (N, ps*ps)
+        
+        A = getattr(self, f"A_{ps}")           # (ps*ps, 6)
+        A_pinv = getattr(self, f"A_pinv_{ps}") # (6, ps*ps)
+        
+        # Solve Ac = patches_flat for c
+        coeffs = patches_flat @ A_pinv.T # (N, 6)
+        
+        # Reconstruct structural background trend
+        trend_flat = coeffs @ A.T # (N, ps*ps)
+        
+        # Subtract background trend to isolate quantum noise
+        detrended_flat = patches_flat - trend_flat
+        return detrended_flat.view(N, ps_dim, ps_dim)
     
     # ------------------------------------------------------------------
     # Step 5: Compute NPS via 2D FFT
@@ -457,12 +490,6 @@ class AnatomyAwareNPSLoss(nn.Module):
                 - Total weighted NPS loss (scalar tensor, differentiable).
                 - Dict of per-tissue NPS losses (for logging).
         """
-        import torchvision.transforms.functional as TF
-
-        # Differentiable residual noise extraction on full tensors
-        pred_noise_full = predicted - TF.gaussian_blur(predicted, kernel_size=5, sigma=1.0)
-        ndct_noise_full = ndct - TF.gaussian_blur(ndct, kernel_size=5, sigma=1.0)
-
         # ██ Step 1-3: Create tissue masks from NDCT ONLY (detached) ██
         tissue_masks = self._create_tissue_masks(ndct)
         
@@ -476,8 +503,9 @@ class AnatomyAwareNPSLoss(nn.Module):
                 continue
             
             # Apply SAME mask to BOTH ndct and predicted simultaneously
+            # Extracts directly from authentic unblurred tensors
             extracted_patches_dict = self._extract_paired_patches(
-                pred_noise_full, ndct_noise_full, mask
+                predicted, ndct, mask
             )
             
             tissue_loss_sum = 0.0
@@ -486,6 +514,10 @@ class AnatomyAwareNPSLoss(nn.Module):
             for ps, (pred_patches, ndct_patches) in extracted_patches_dict.items():
                 if pred_patches is None or ndct_patches is None:
                     continue
+
+                # Local 2D 2nd-order polynomial detrending to extract pure noise
+                pred_patches = self._detrend_patches(pred_patches, ps)
+                ndct_patches = self._detrend_patches(ndct_patches, ps)
 
                 # ██ Step 5: Compute NPS for both ██
                 nps_pred = self._compute_nps(pred_patches)

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+import scipy.ndimage as ndimage
 
 try:
     import SimpleITK as sitk
@@ -257,12 +258,40 @@ class HallucinationAnalyzer:
         # Create body mask from NDCT
         mask = self._create_body_mask(ndct_hu)
         
-        if mask.sum() < 100:
+        ps = 32
+        if mask.sum() < ps * ps:
             return {"status": "skipped", "reason": "insufficient body region"}
         
-        # Extract features
-        feat_pred = self._extract_features(pred_hu, mask)
-        feat_ndct = self._extract_features(ndct_hu, mask)
+        # Calculate absolute error strictly within body mask
+        err = np.abs(pred_hu - ndct_hu) * mask
+        
+        # Find 32x32 region with maximum mean absolute error
+        # uniform_filter computes the mean over a sliding 32x32 window
+        mean_err = ndimage.uniform_filter(err, size=ps, mode='constant', cval=0.0)
+        
+        # Zero out borders to prevent picking patches that bleed off the image boundaries
+        half_ps = ps // 2
+        mean_err[:half_ps, :] = 0
+        mean_err[-half_ps:, :] = 0
+        mean_err[:, :half_ps] = 0
+        mean_err[:, -half_ps:] = 0
+        
+        # Find coordinate of maximum mean error
+        y_c, x_c = np.unravel_index(np.argmax(mean_err), mean_err.shape)
+        
+        y0, y1 = y_c - half_ps, y_c + half_ps
+        x0, x1 = x_c - half_ps, x_c + half_ps
+        
+        # Extract the highest-risk patches
+        pred_roi = pred_hu[y0:y1, x0:x1]
+        ndct_roi = ndct_hu[y0:y1, x0:x1]
+        
+        # Create an all-ones mask for the extracted patch to bypass global dilution
+        roi_mask = np.ones((ps, ps), dtype=np.uint8)
+        
+        # Extract features exclusively on the 32x32 high-risk ROI
+        feat_pred = self._extract_features(pred_roi, roi_mask)
+        feat_ndct = self._extract_features(ndct_roi, roi_mask)
         
         # Compare
         return self._compare_features(feat_pred, feat_ndct)
