@@ -47,7 +47,7 @@ class FrequencyLoss(nn.Module):
         x = x - x.mean(dim=(-2, -1), keepdim=True)
         fft = torch.fft.fft2(x)
         fft_shifted = torch.fft.fftshift(fft)
-        magnitude = torch.abs(fft_shifted)
+        magnitude = torch.sqrt(fft_shifted.real**2 + fft_shifted.imag**2 + 1e-8)
         
         if self.log_scale:
             magnitude = torch.log1p(magnitude)  # log(1 + |FFT|)
