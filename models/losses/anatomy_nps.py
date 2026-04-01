@@ -58,8 +58,16 @@ DEFAULT_TISSUE_WEIGHTS = {
     "lung":        1.5,   # Important for nodule detection
     "fat":         1.0,   # Standard
     "soft_tissue": 2.0,   # Highest priority — organs, tumors
-    "bone":        0.5,   # Lower priority
+    "bone":        0.0,   # NPS not computed on bone (AAPM standard)
 }
+
+# Values for normalized [-1, 1] tensor space
+TISSUE_HOMOGENEITY_THRESHOLDS = {
+    "fat":         0.02,  # Strict limit: acts like a water phantom
+    "soft_tissue": 0.04,  # Rejects large vessels in liver/muscle
+    "lung":        0.08,  # Tolerates parenchyma, rejects large vascular/airway structures
+}
+
 
 
 # ======================================================================
@@ -190,17 +198,31 @@ class AnatomyAwareNPSLoss(nn.Module):
         self.open_kernel = open_kernel
         self.min_area = min_area
         
-        # Precompute Pseudoinverse for 2D 2nd-order polynomial detrending
+        # Precompute Pseudoinverse for 2D 1st-order (plane) polynomial detrending (AAPM TG-233)
         self.scales = [32, 64, 128]
         for ps in self.scales:
             y, x = torch.meshgrid(torch.linspace(-1, 1, ps), torch.linspace(-1, 1, ps), indexing="ij")
             y_flat, x_flat = y.flatten(), x.flatten()
             A = torch.stack([
-                torch.ones_like(x_flat), x_flat, y_flat, x_flat ** 2, y_flat ** 2, x_flat * y_flat
-            ], dim=1) # (ps*ps, 6)
-            A_pinv = torch.linalg.pinv(A) # (6, ps*ps)
+                torch.ones_like(x_flat), x_flat, y_flat
+            ], dim=1) # (ps*ps, 3)
+            A_pinv = torch.linalg.pinv(A) # (3, ps*ps)
             self.register_buffer(f"A_{ps}", A)
             self.register_buffer(f"A_pinv_{ps}", A_pinv)
+
+    def _sobel_gradient_magnitude(self, patch: torch.Tensor) -> float:
+        """Compute the mean Sobel gradient magnitude of a patch to detect high-frequency edges."""
+        patch_4d = patch.unsqueeze(0).unsqueeze(0) # (1, 1, ps, ps)
+        
+        # Differentiable Sobel kernels
+        sobel_x = torch.tensor([[-1., 0., 1.], [-2., 0., 2.], [-1., 0., 1.]], device=patch.device).view(1, 1, 3, 3) / 8.0
+        sobel_y = torch.tensor([[-1., -2., -1.], [0., 0., 0.], [1., 2., 1.]], device=patch.device).view(1, 1, 3, 3) / 8.0
+        
+        grad_x = F.conv2d(patch_4d, sobel_x, padding=1)
+        grad_y = F.conv2d(patch_4d, sobel_y, padding=1)
+        
+        magnitude = torch.sqrt(grad_x**2 + grad_y**2)
+        return magnitude.mean().item()
     
     # ------------------------------------------------------------------
     # Step 1: Denormalize to HU space
@@ -270,9 +292,11 @@ class AnatomyAwareNPSLoss(nn.Module):
         pred_image: torch.Tensor,
         ndct_image: torch.Tensor,
         mask: torch.Tensor,
+        tissue_name: str,
     ) -> Dict[int, Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]]:
         B, _, H, W = pred_image.shape
         scales = [32, 64, 128]
+        homogeneity_thresh = TISSUE_HOMOGENEITY_THRESHOLDS.get(tissue_name, 999.0)
 
         extracted_patches = {}
 
@@ -289,12 +313,15 @@ class AnatomyAwareNPSLoss(nn.Module):
                     continue
 
                 valid_positions = []
-                stride = ps // 2
+                stride = ps  # Strict non-overlapping patches to prevent auto-correlation
                 for y in range(0, H - ps + 1, stride):
                     for x in range(0, W - ps + 1, stride):
                         patch_mask = mask_b[y:y + ps, x:x + ps]
                         if patch_mask.mean().item() >= 0.75:
-                            valid_positions.append((y, x))
+                            ndct_patch = ndct_b[y:y+ps, x:x+ps]
+                            # AAPM TG-233 edge rejection logic
+                            if self._sobel_gradient_magnitude(ndct_patch) < homogeneity_thresh:
+                                valid_positions.append((y, x))
 
                 if not valid_positions:
                     continue
@@ -346,8 +373,8 @@ class AnatomyAwareNPSLoss(nn.Module):
             # Grid of possible patch top-left corners
             valid_positions = []
             
-            # Stride to avoid too many candidates
-            stride = ps // 2
+            # Strict non-overlapping
+            stride = ps
             for y in range(0, H - ps + 1, stride):
                 for x in range(0, W - ps + 1, stride):
                     patch_mask = mask_b[y:y + ps, x:x + ps]
@@ -375,17 +402,17 @@ class AnatomyAwareNPSLoss(nn.Module):
 
     def _detrend_patches(self, patches: torch.Tensor, ps: int) -> torch.Tensor:
         """
-        Detrends extracted patches by fitting and subtracting a 2nd-order polynomial surface,
-        effectively isolating quantum noise while preserving authentic structural variance.
+        Detrends extracted patches by fitting and subtracting a 1st-order (plane) polynomial,
+        removing low-frequency beam hardening/cupping artifacts without overfitting quantum noise.
         """
         N, ps_dim, _ = patches.shape
         patches_flat = patches.view(N, -1) # (N, ps*ps)
         
-        A = getattr(self, f"A_{ps}")           # (ps*ps, 6)
-        A_pinv = getattr(self, f"A_pinv_{ps}") # (6, ps*ps)
+        A = getattr(self, f"A_{ps}")           # (ps*ps, 3)
+        A_pinv = getattr(self, f"A_pinv_{ps}") # (3, ps*ps)
         
         # Solve Ac = patches_flat for c
-        coeffs = patches_flat @ A_pinv.T # (N, 6)
+        coeffs = patches_flat @ A_pinv.T # (N, 3)
         
         # Reconstruct structural background trend
         trend_flat = coeffs @ A.T # (N, ps*ps)
@@ -503,9 +530,9 @@ class AnatomyAwareNPSLoss(nn.Module):
                 continue
             
             # Apply SAME mask to BOTH ndct and predicted simultaneously
-            # Extracts directly from authentic unblurred tensors
+            # Extracts directly from authentic unblurred tensors, filtered by Homogeneity limit
             extracted_patches_dict = self._extract_paired_patches(
-                predicted, ndct, mask
+                predicted, ndct, mask, tissue_name
             )
             
             tissue_loss_sum = 0.0
@@ -515,7 +542,7 @@ class AnatomyAwareNPSLoss(nn.Module):
                 if pred_patches is None or ndct_patches is None:
                     continue
 
-                # Local 2D 2nd-order polynomial detrending to extract pure noise
+                # Local 1st-order (Plane) detrending to extract pure noise
                 pred_patches = self._detrend_patches(pred_patches, ps)
                 ndct_patches = self._detrend_patches(ndct_patches, ps)
 
@@ -557,9 +584,9 @@ if __name__ == "__main__":
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
-    # Simulate normalized images [-1, 1]
+    # Simulate normalized images [-1, 1] — must be flat to pass AAPM TG-233 Sobel test
     B, C, H, W = 2, 1, 512, 512
-    ndct = torch.randn(B, C, H, W, device=device) * 0.3  # Low variance (clean)
+    ndct = torch.zeros(B, C, H, W, device=device)  # Perfectly flat (clean)
     predicted = ndct + torch.randn_like(ndct) * 0.1        # Slightly noisy
     predicted.requires_grad_(True)
     
