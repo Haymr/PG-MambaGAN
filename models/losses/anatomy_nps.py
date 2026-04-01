@@ -102,7 +102,7 @@ def clean_mask(
     mask: torch.Tensor,
     close_kernel: int = 5,
     open_kernel: int = 3,
-    min_area: int = 4096,  # 64² pixels
+    min_area: int = 256,  # 16² pixels
 ) -> torch.Tensor:
     """
     Full morphological cleanup pipeline.
@@ -177,7 +177,7 @@ class AnatomyAwareNPSLoss(nn.Module):
         n_patches: int = 8,
         close_kernel: int = 5,
         open_kernel: int = 3,
-        min_area: int = 4096,
+        min_area: int = 256,
     ):
         super().__init__()
         
@@ -258,44 +258,49 @@ class AnatomyAwareNPSLoss(nn.Module):
         pred_image: torch.Tensor,
         ndct_image: torch.Tensor,
         mask: torch.Tensor,
-    ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+    ) -> Dict[int, Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]]:
         B, _, H, W = pred_image.shape
-        ps = self.patch_size
+        scales = [32, 64, 128]
 
-        all_pred_patches = []
-        all_ndct_patches = []
+        extracted_patches = {}
 
-        for b in range(B):
-            pred_b = pred_image[b, 0]
-            ndct_b = ndct_image[b, 0]
-            mask_b = mask[b, 0]
+        for ps in scales:
+            all_pred_patches = []
+            all_ndct_patches = []
 
-            if mask_b.sum() < ps * ps:
-                continue
+            for b in range(B):
+                pred_b = pred_image[b, 0]
+                ndct_b = ndct_image[b, 0]
+                mask_b = mask[b, 0]
 
-            valid_positions = []
-            stride = ps // 2
-            for y in range(0, H - ps + 1, stride):
-                for x in range(0, W - ps + 1, stride):
-                    patch_mask = mask_b[y:y + ps, x:x + ps]
-                    if patch_mask.mean().item() >= 0.75:
-                        valid_positions.append((y, x))
+                if mask_b.sum() < ps * ps:
+                    continue
 
-            if not valid_positions:
-                continue
+                valid_positions = []
+                stride = ps // 2
+                for y in range(0, H - ps + 1, stride):
+                    for x in range(0, W - ps + 1, stride):
+                        patch_mask = mask_b[y:y + ps, x:x + ps]
+                        if patch_mask.mean().item() >= 0.75:
+                            valid_positions.append((y, x))
 
-            n = min(self.n_patches, len(valid_positions))
-            indices = torch.randperm(len(valid_positions))[:n]
+                if not valid_positions:
+                    continue
 
-            for idx in indices:
-                y, x = valid_positions[idx]
-                all_pred_patches.append(pred_b[y:y + ps, x:x + ps])
-                all_ndct_patches.append(ndct_b[y:y + ps, x:x + ps])
+                n = min(self.n_patches, len(valid_positions))
+                indices = torch.randperm(len(valid_positions))[:n]
 
-        if not all_pred_patches:
-            return None, None
+                for idx in indices:
+                    y, x = valid_positions[idx]
+                    all_pred_patches.append(pred_b[y:y + ps, x:x + ps])
+                    all_ndct_patches.append(ndct_b[y:y + ps, x:x + ps])
 
-        return torch.stack(all_pred_patches), torch.stack(all_ndct_patches)
+            if not all_pred_patches:
+                extracted_patches[ps] = (None, None)
+            else:
+                extracted_patches[ps] = (torch.stack(all_pred_patches), torch.stack(all_ndct_patches))
+
+        return extracted_patches
 
     def _extract_masked_patches(
         self,
@@ -372,6 +377,11 @@ class AnatomyAwareNPSLoss(nn.Module):
         """
         N, ps, _ = patches.shape
         
+        # Apply 2D Hanning window to prevent spectral leakage
+        window = torch.hann_window(ps, device=patches.device)
+        window_2d = window.unsqueeze(1) * window.unsqueeze(0)
+        patches = patches * window_2d.unsqueeze(0)
+
         # 2D FFT
         fft = torch.fft.fft2(patches)
         fft_shifted = torch.fft.fftshift(fft)
@@ -381,7 +391,11 @@ class AnatomyAwareNPSLoss(nn.Module):
         power = torch.log1p(power)
 
         center = ps // 2
-        power[:, center, center] = 0.0
+
+        # Out-of-place mask to avoid breaking autograd
+        mask = torch.ones_like(power[0])
+        mask[center, center] = 0.0
+        power = power * mask.unsqueeze(0)
         
         # Average over all patches
         mean_power = power.mean(dim=0)  # (ps, ps)
@@ -462,25 +476,37 @@ class AnatomyAwareNPSLoss(nn.Module):
                 continue
             
             # Apply SAME mask to BOTH ndct and predicted simultaneously
-            pred_patches, ndct_patches = self._extract_paired_patches(
+            extracted_patches_dict = self._extract_paired_patches(
                 pred_noise_full, ndct_noise_full, mask
             )
             
-            if pred_patches is None or ndct_patches is None:
+            tissue_loss_sum = 0.0
+            scales_valid = 0
+
+            for ps, (pred_patches, ndct_patches) in extracted_patches_dict.items():
+                if pred_patches is None or ndct_patches is None:
+                    continue
+
+                # ██ Step 5: Compute NPS for both ██
+                nps_pred = self._compute_nps(pred_patches)
+                nps_ndct = self._compute_nps(ndct_patches)
+
+                # ██ Step 6: L2 loss between NPS curves for this scale ██
+                nps_diff = F.mse_loss(nps_pred, nps_ndct)
+                tissue_loss_sum += nps_diff
+                scales_valid += 1
+
+            if scales_valid == 0:
                 tissue_losses[tissue_name] = 0.0
                 continue
             
-            # ██ Step 5: Compute NPS for both ██
-            nps_pred = self._compute_nps(pred_patches)
-            nps_ndct = self._compute_nps(ndct_patches)
+            # Average over all scales
+            tissue_nps_diff = tissue_loss_sum / scales_valid
             
-            # ██ Step 6: Weighted L2 loss between NPS curves ██
-            nps_diff = F.mse_loss(nps_pred, nps_ndct)
-            
-            weighted_diff = weight * nps_diff
+            weighted_diff = weight * tissue_nps_diff
             total_loss = total_loss + weighted_diff
             
-            tissue_losses[tissue_name] = nps_diff.item()
+            tissue_losses[tissue_name] = tissue_nps_diff.item()
             n_valid += 1
         
         # Normalize by number of valid tissues
