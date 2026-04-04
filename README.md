@@ -32,23 +32,23 @@ PG-MambaGAN introduces three novel contributions to low-dose CT denoising:
 ```
 LDCT (1, 512, 512)
   │
-  ├─ Patch Embed ─── Conv 4×4, stride 4 ──→ (96, 128, 128)
+  ├─ Patch Embed ─── Conv 3×3, stride 2, pad 1 ──→ (96, 256, 256)
   │
   ├─ Encoder ──────────────────────────────────────────────
-  │  Stage 1:  2× VSS Block, dim=96   (128×128) ──→ skip₁
+  │  Stage 1:  2× VSS Block, dim=96   (256×256) ──→ skip₁
   │  ↓ PatchMerging
-  │  Stage 2:  2× VSS Block, dim=192  (64×64)   ──→ skip₂
+  │  Stage 2:  2× VSS Block, dim=192  (128×128) ──→ skip₂
   │  ↓ PatchMerging
-  │  Stage 3:  4× VSS Block, dim=384  (32×32)   ──→ skip₃
+  │  Stage 3:  4× VSS Block, dim=384  (64×64)   ──→ skip₃
   │  ↓ PatchMerging
-  │  Stage 4:  2× VSS Block, dim=768  (16×16)   Bottleneck
+  │  Stage 4:  2× VSS Block, dim=768  (32×32)   Bottleneck
   │
   ├─ Decoder ──────────────────────────────────────────────
-  │  ↑ PatchExpanding + skip₃ → 4× VSS, dim=384  (32×32)
-  │  ↑ PatchExpanding + skip₂ → 2× VSS, dim=192  (64×64)
-  │  ↑ PatchExpanding + skip₁ → 2× VSS, dim=96   (128×128)
+  │  ↑ PatchExpanding + skip₃ → 4× VSS, dim=384  (64×64)
+  │  ↑ PatchExpanding + skip₂ → 2× VSS, dim=192  (128×128)
+  │  ↑ PatchExpanding + skip₁ → 2× VSS, dim=96   (256×256)
   │
-  └─ Head ─── TransposeConv 4×4 → Conv 1×1 → Tanh
+  └─ Head ─── Bilinear Upsample → Conv 3×3 → Conv 3×3 → Tanh
                ──→ Denoised (1, 512, 512)
 ```
 
@@ -131,7 +131,7 @@ PG-MambaGAN/
 ├── setup/
 │   ├── environment.py            # Dual-env detection + VRAM profiling
 │   └── colab_setup.py            # One-click Colab setup
-├── legacy/                       # Original TF code (archived)
+
 ├── notebooks/
 │   └── train_colab.ipynb         # Google Colab training notebook
 ├── preprocess.py                 # DICOM → NPY (512×512) + metadata
