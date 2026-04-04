@@ -155,7 +155,11 @@ def clean_mask(
 
 class AnatomyAwareNPSLoss(nn.Module):
     """
-    Anatomy-Aware Noise Power Spectrum Loss.
+    PG-MambaGAN — Anatomy-Aware Noise Power Spectrum (NPS) Loss
+
+    Reference:
+        Physics-guided metrics based on AAPM TG-233 standards for 
+        medical noise power spectrum modeling.
     
     Computes NPS separately for each tissue type using masks derived
     from the NDCT ground truth image. The per-tissue NPS differences

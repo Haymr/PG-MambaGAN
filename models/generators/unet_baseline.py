@@ -1,7 +1,10 @@
 """
-PG-MambaGAN — Baseline U-Net Generator (PyTorch)
+PG-MambaGAN — Baseline U-Net Generator
 
-Standard CNN U-Net for ablation study comparison.
+Reference:
+    Baseline U-Net adapted from basic Medical Image Denoising conventions.
+
+Standard CNN-based U-Net architecture for baseline ablation studies.
 This is the PyTorch equivalent of the original TF-based generator.
 
 Architecture:

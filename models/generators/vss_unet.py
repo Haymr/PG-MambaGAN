@@ -1,6 +1,10 @@
 """
 PG-MambaGAN — VSS-U-Net Generator
 
+Reference: 
+    Inspired by VMamba (Liu et al., 2024) and Mamba-ND. 
+    Core SSM logic adapted from `mamba-ssm` (Gu & Dao, 2023).
+
 Full Visual State Space U-Net architecture for LDCT denoising.
 Replaces CNN encoder/decoder with VSS (Mamba-based) stages.
 
@@ -178,18 +182,21 @@ class VSSUNet(nn.Module):
                 )
             )
         
-        # ==============================================================
-        # Final Upsample Head: 128×128 → 512×512
-        # ==============================================================
         self.final_upsample = nn.Sequential(
-            nn.ConvTranspose2d(
-                embed_dim, embed_dim // 2,
-                kernel_size=4 if patch_size == 2 else patch_size, 
-                stride=patch_size, 
-                padding=1 if patch_size == 2 else 0,
-            ),
+            # 1. Eksiksiz yüksek çözünürlüğe taşı (Yüksek Kalite)
+            nn.Upsample(scale_factor=patch_size, mode='bilinear', align_corners=False),
+            
+            # 2. Receptive field'ı genişlet ve kanalları düşür
+            nn.Conv2d(embed_dim, embed_dim // 2, kernel_size=3, padding=1),
             LayerNorm2d(embed_dim // 2),
             nn.GELU(),
+            
+            # 3. Artefaktları tamamen yok eden (smoothing) 2. Evrişim
+            nn.Conv2d(embed_dim // 2, embed_dim // 2, kernel_size=3, padding=1),
+            LayerNorm2d(embed_dim // 2),
+            nn.GELU(),
+            
+            # 4. Çıktı
             nn.Conv2d(embed_dim // 2, out_channels, kernel_size=3, padding=1),
             nn.Tanh(),
         )

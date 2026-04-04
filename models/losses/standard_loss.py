@@ -1,7 +1,11 @@
 """
-PG-MambaGAN — Standard Losses (L1, Wasserstein, Gradient Penalty)
+PG-MambaGAN — Standard Losses (PyTorch)
 
-Core GAN loss functions for WGAN-GP training.
+Reference:
+    Standard L1 and Wasserstein GAN with Gradient Penalty 
+    objective functions based on conventions.
+
+Provides L1 (MAE) and WGAN-GP adversarial losses.
 
 Usage:
     from models.losses.standard_loss import l1_loss, wasserstein_g_loss, \

@@ -1,6 +1,10 @@
 """
 PG-MambaGAN — SN-PatchGAN Discriminator (PyTorch)
 
+Reference:
+    Discriminator architecture based on Pix2Pix PatchGAN (Isola et al., 2017) 
+    and Wassertein GAN-GP (Gulrajani et al., 2017).
+
 PatchGAN discriminator with Spectral Normalization for WGAN-GP training.
 
 Architecture:

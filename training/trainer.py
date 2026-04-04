@@ -1,6 +1,10 @@
 """
 PG-MambaGAN — PyTorch WGAN-GP Trainer (VRAM-Optimized)
 
+Reference:
+    Discriminator architecture based on Pix2Pix PatchGAN (Isola et al., 2017) 
+    and Wassertein GAN-GP (Gulrajani et al., 2017).
+
 Full training loop with:
     - BFloat16 Mixed Precision (AMP)
     - Gradient Accumulation — physical batch 1-2, effective 8-16
