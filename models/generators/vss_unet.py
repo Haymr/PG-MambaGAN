@@ -103,8 +103,10 @@ class VSSUNet(nn.Module):
         # Patch Embedding
         # ==============================================================
         self.patch_embed = nn.Sequential(
-            nn.Conv2d(in_channels, embed_dim, kernel_size=patch_size,
-                      stride=patch_size, padding=0),
+            nn.Conv2d(in_channels, embed_dim, 
+                      kernel_size=3 if patch_size < 4 else patch_size,
+                      stride=patch_size, 
+                      padding=1 if patch_size < 4 else 0),
             LayerNorm2d(embed_dim),
         )
         # 512×512 → 128×128
@@ -182,7 +184,9 @@ class VSSUNet(nn.Module):
         self.final_upsample = nn.Sequential(
             nn.ConvTranspose2d(
                 embed_dim, embed_dim // 2,
-                kernel_size=patch_size, stride=patch_size, padding=0,
+                kernel_size=4 if patch_size == 2 else patch_size, 
+                stride=patch_size, 
+                padding=1 if patch_size == 2 else 0,
             ),
             LayerNorm2d(embed_dim // 2),
             nn.GELU(),

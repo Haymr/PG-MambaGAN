@@ -113,16 +113,16 @@ PG-MambaGAN/
 │   ├── generators/
 │   │   ├── vss_block.py          # SS2D + Mamba SSM kernel
 │   │   ├── vss_unet.py           # Full VSS-U-Net generator
-│   │   └── unet_baseline_pt.py   # CNN baseline (ablation)
+│   │   └── unet_baseline.py   # CNN baseline (ablation)
 │   ├── discriminators/
-│   │   └── patch_disc_pt.py      # SN-PatchGAN (WGAN-GP)
+│   │   └── patch_disc.py      # SN-PatchGAN (WGAN-GP)
 │   └── losses/
 │       ├── anatomy_nps.py        # ★ Anatomy-Aware NPS Loss
-│       ├── frequency_pt.py       # Multi-scale FFT loss
-│       ├── perceptual_pt.py      # VGG19 + LPIPS
-│       └── standard_pt.py        # L1, Wasserstein, GP
+│       ├── frequency_loss.py       # Multi-scale FFT loss
+│       ├── perceptual_loss.py      # VGG19 + LPIPS
+│       └── standard_loss.py        # L1, Wasserstein, GP
 ├── training/
-│   └── trainer_pt.py             # VRAM-optimized WGAN-GP trainer
+│   └── trainer.py             # VRAM-optimized WGAN-GP trainer
 ├── evaluation/
 │   ├── metrics.py                # 2D + 3D metrics
 │   ├── volumetric.py             # 3D NIfTI assembly

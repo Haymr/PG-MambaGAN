@@ -4,7 +4,7 @@ PG-MambaGAN — Standard Losses (L1, Wasserstein, Gradient Penalty)
 Core GAN loss functions for WGAN-GP training.
 
 Usage:
-    from models.losses.standard_pt import l1_loss, wasserstein_g_loss, \
+    from models.losses.standard_loss import l1_loss, wasserstein_g_loss, \
         wasserstein_d_loss, gradient_penalty
 """
 

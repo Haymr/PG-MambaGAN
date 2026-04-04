@@ -1,5 +1,5 @@
 """PG-MambaGAN Training"""
 
-from training.trainer_pt import Trainer
+from training.trainer import Trainer
 
 __all__ = ["Trainer"]

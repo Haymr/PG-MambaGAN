@@ -169,7 +169,6 @@ class AnatomyAwareNPSLoss(nn.Module):
         hu_min: Minimum HU value used during normalization (default: -1000).
         hu_max: Maximum HU value used during normalization (default: 1000).
         tissue_weights: Dict of tissue_name → weight for loss computation.
-        patch_size: NPS computation patch size (default: 64).
         n_patches: Number of random patches per tissue region (default: 8).
         close_kernel: Morphological closing kernel size (default: 5).
         open_kernel: Morphological opening kernel size (default: 3).
@@ -181,7 +180,6 @@ class AnatomyAwareNPSLoss(nn.Module):
         hu_min: int = -1000,
         hu_max: int = 1000,
         tissue_weights: Optional[Dict[str, float]] = None,
-        patch_size: int = 64,
         n_patches: int = 8,
         close_kernel: int = 5,
         open_kernel: int = 3,
@@ -192,7 +190,6 @@ class AnatomyAwareNPSLoss(nn.Module):
         self.hu_min = hu_min
         self.hu_max = hu_max
         self.tissue_weights = tissue_weights or DEFAULT_TISSUE_WEIGHTS
-        self.patch_size = patch_size
         self.n_patches = n_patches
         self.close_kernel = close_kernel
         self.open_kernel = open_kernel
@@ -340,65 +337,6 @@ class AnatomyAwareNPSLoss(nn.Module):
                 extracted_patches[ps] = (torch.stack(all_pred_patches), torch.stack(all_ndct_patches))
 
         return extracted_patches
-
-    def _extract_masked_patches(
-        self,
-        image: torch.Tensor,
-        mask: torch.Tensor,
-    ) -> Optional[torch.Tensor]:
-        """
-        Extract patches from image within the masked region.
-        
-        Args:
-            image: Image tensor (B, 1, H, W).
-            mask: Binary mask (B, 1, H, W), detached.
-            
-        Returns:
-            Patches tensor (N, patch_size, patch_size) or None if
-            insufficient valid region.
-        """
-        B, _, H, W = image.shape
-        ps = self.patch_size
-        
-        all_patches = []
-        
-        for b in range(B):
-            # Find valid patch positions (where mask has enough coverage)
-            img_b = image[b, 0]   # (H, W)
-            mask_b = mask[b, 0]   # (H, W)
-            
-            if mask_b.sum() < ps * ps:
-                continue
-            
-            # Grid of possible patch top-left corners
-            valid_positions = []
-            
-            # Strict non-overlapping
-            stride = ps
-            for y in range(0, H - ps + 1, stride):
-                for x in range(0, W - ps + 1, stride):
-                    patch_mask = mask_b[y:y + ps, x:x + ps]
-                    # Require at least 75% coverage within the patch
-                    coverage = patch_mask.mean().item()
-                    if coverage >= 0.75:
-                        valid_positions.append((y, x))
-            
-            if not valid_positions:
-                continue
-            
-            # Random sample from valid positions
-            n = min(self.n_patches, len(valid_positions))
-            indices = torch.linspace(0, len(valid_positions) - 1, steps=n).long()
-            
-            for idx in indices:
-                y, x = valid_positions[idx]
-                patch = img_b[y:y + ps, x:x + ps]
-                all_patches.append(patch)
-        
-        if not all_patches:
-            return None
-        
-        return torch.stack(all_patches)  # (N, ps, ps)
 
     def _detrend_patches(self, patches: torch.Tensor, ps: int) -> torch.Tensor:
         """

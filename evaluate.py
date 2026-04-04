@@ -32,7 +32,7 @@ import yaml
 from data.patient_manifest import PatientManifest
 from data.dataset import LDCTDataset
 from models.generators.vss_unet import VSSUNet
-from models.generators.unet_baseline_pt import UNetBaseline
+from models.generators.unet_baseline import UNetBaseline
 from evaluation.metrics import compute_2d_metrics, compute_volumetric_metrics
 from evaluation.volumetric import VolumeAssembler
 from evaluation.hallucination import HallucinationAnalyzer

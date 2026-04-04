@@ -2,7 +2,7 @@
 PG-MambaGAN — PyTorch WGAN-GP Trainer (VRAM-Optimized)
 
 Full training loop with:
-    - BFloat16 Mixed Precision (AMP) — Revision #2
+    - BFloat16 Mixed Precision (AMP)
     - Gradient Accumulation — physical batch 1-2, effective 8-16
     - EMA (Exponential Moving Average) for generator
     - n-critic discriminator training
@@ -26,7 +26,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from models.losses.standard_pt import (
+from models.losses.standard_loss import (
     wasserstein_g_loss,
     wasserstein_d_loss,
     gradient_penalty,

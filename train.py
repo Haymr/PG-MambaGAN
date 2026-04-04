@@ -29,13 +29,13 @@ from setup.environment import Environment
 from data.patient_manifest import PatientManifest
 from data.dataset import LDCTDataset
 from models.generators.vss_unet import VSSUNet
-from models.generators.unet_baseline_pt import UNetBaseline
-from models.discriminators.patch_disc_pt import PatchDiscriminator
-from models.losses.standard_pt import L1Loss
-from models.losses.perceptual_pt import PerceptualLoss
-from models.losses.frequency_pt import FrequencyLoss
+from models.generators.unet_baseline import UNetBaseline
+from models.discriminators.patch_disc import PatchDiscriminator
+from models.losses.standard_loss import L1Loss
+from models.losses.perceptual_loss import PerceptualLoss
+from models.losses.frequency_loss import FrequencyLoss
 from models.losses.anatomy_nps import AnatomyAwareNPSLoss
-from training.trainer_pt import Trainer
+from training.trainer import Trainer
 
 
 def load_config(config_path: str) -> dict:

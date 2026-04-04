@@ -1,0 +1,35 @@
+commit 7231a2a8f8683c0e70870c6117246f21e36c1003
+Author: Haymr <112877640+Haymr@users.noreply.github.com>
+Date:   Wed Apr 1 01:16:28 2026 +0300
+
+    fix(methodology): resolve paired extraction and 3D metric masking illusions (#4)
+    
+    - Implemented _extract_paired_patches in AnatomyAwareNPSLoss to ensure pixel-perfect spatial alignment for noise spectrum calculation.
+    - Integrated body contouring masks into all 3D volumetric metrics (Axial, Coronal, Sagittal) to prevent background air metric inflation.
+    - Stabilized Shannon Entropy PMF and forced 2D GLCM extraction in hallucination analysis.
+
+ evaluation/hallucination.py   |   9 ++-
+ evaluation/metrics.py         | 124 ++++++++++++++++++++++++++++++++----------
+ evaluation/volumetric.py      |   2 +-
+ models/losses/anatomy_nps.py  |  61 +++++++++++++++++++--
+ models/losses/frequency_pt.py |   1 +
+ training/trainer_pt.py        |  36 ++++++++----
+ 6 files changed, 183 insertions(+), 50 deletions(-)
+
+commit e18542bee5dd86fc5c5f484efbad239f5e8afe3f
+Author: Haymr <112877640+Haymr@users.noreply.github.com>
+Date:   Tue Mar 31 14:05:02 2026 +0300
+
+    Fix NPS math, AMP instability, HU norm, VRAM leak, and interpolation artifacts (#2)
+    
+    - Fix mathematical explosion in NPS loss by applying log1p and zeroing DC component.
+    - Fix AMP/FFT instability by moving freq loss outside autocast and casting to float.
+    - Implement strict HU [-1000, 1000] normalization.
+    - Fix VRAM leak by removing redundant .copy() and using ascontiguousarray.
+    - Fix interpolation artifacts by clipping HU values before resizing.
+
+ data/dataset.py              | 21 +++++++++++++++------
+ models/losses/anatomy_nps.py |  4 ++++
+ preprocess.py                |  7 +++++++
+ training/trainer_pt.py       | 11 ++++++-----
+ 4 files changed, 32 insertions(+), 11 deletions(-)
