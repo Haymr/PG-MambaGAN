@@ -6,7 +6,7 @@ Standard image quality metrics and 3D volumetric metrics.
 2D Per-Slice:
     - PSNR, SSIM, RMSE, MAE
 
-3D Volumetric (Revision #3):
+3D Volumetric:
     - 3D-SSIM (slice-by-slice averaged)
     - Flickering Index (z-axis continuity)
     - VIF (Visual Information Fidelity)

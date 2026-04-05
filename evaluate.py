@@ -33,7 +33,7 @@ from data.patient_manifest import PatientManifest
 from data.dataset import LDCTDataset
 from models.generators.vss_unet import VSSUNet
 from models.generators.unet_baseline import UNetBaseline
-from evaluation.metrics import compute_2d_metrics, compute_volumetric_metrics
+from evaluation.metrics import compute_2d_metrics, compute_volumetric_metrics, get_body_mask
 from evaluation.volumetric import VolumeAssembler
 from evaluation.hallucination import HallucinationAnalyzer
 from evaluation.clinical_task import ClinicalTaskValidator
@@ -95,7 +95,11 @@ def evaluate_2d(
             pred_np = predicted.squeeze().cpu().numpy()
             ndct_np = ndct.squeeze().cpu().numpy()
             
-            metrics = compute_2d_metrics(pred_np, ndct_np)
+            # Body mask to prevent background air inflation
+            ndct_hu = (ndct_np + 1.0) / 2.0 * 2000.0 - 1000.0
+            body_mask = get_body_mask(ndct_hu)
+            
+            metrics = compute_2d_metrics(pred_np, ndct_np, body_mask=body_mask)
             for k, v in metrics.items():
                 all_metrics[k].append(v)
     
