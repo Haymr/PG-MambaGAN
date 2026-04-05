@@ -113,7 +113,7 @@ class VSSUNet(nn.Module):
                       padding=1 if patch_size < 4 else 0),
             LayerNorm2d(embed_dim),
         )
-        # 512×512 → 128×128
+        # 512×512 → 256×256
         
         # ==============================================================
         # Encoder
@@ -232,7 +232,7 @@ class VSSUNet(nn.Module):
         Returns:
             Denoised output tensor (B, 1, 512, 512)
         """
-        # Patch embedding: (B, 1, 512, 512) → (B, 96, 128, 128)
+        # Patch embedding: (B, 1, 512, 512) → (B, 96, 256, 256)
         x = self.patch_embed(x)
         
         # ----- Encoder -----
@@ -244,7 +244,7 @@ class VSSUNet(nn.Module):
                 skips.append(x)  # Save skip before downsampling
                 x = self.downsample_layers[i](x)
         
-        # x is now the bottleneck: (B, 768, 16, 16)
+        # x is now the bottleneck: (B, 768, 32, 32)
         
         # ----- Decoder -----
         for i in range(self.num_stages - 1):
@@ -259,10 +259,10 @@ class VSSUNet(nn.Module):
             # Decoder VSS stage
             x = self.decoder_stages[i](x)
         
-        # x is now (B, 96, 128, 128)
+        # x is now (B, 96, 256, 256)
         
         # ----- Final upsample -----
-        # (B, 96, 128, 128) → (B, 1, 512, 512)
+        # (B, 96, 256, 256) → (B, 1, 512, 512)
         x = self.final_upsample(x)
         
         return x

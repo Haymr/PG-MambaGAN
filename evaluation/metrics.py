@@ -152,7 +152,7 @@ def compute_2d_metrics(
 
 
 # ======================================================================
-# 3D Volumetric Metrics (Revision #3)
+# 3D Volumetric Metrics
 # ======================================================================
 
 def compute_3d_ssim(

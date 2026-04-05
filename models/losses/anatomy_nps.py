@@ -535,7 +535,6 @@ if __name__ == "__main__":
     criterion = AnatomyAwareNPSLoss(
         hu_min=-1000,
         hu_max=1000,
-        patch_size=64,
         n_patches=4,
     )
     
