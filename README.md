@@ -247,7 +247,7 @@ python evaluate.py \
 # Edit configs/default.yaml: generator: "unet_baseline"
 python train.py --config configs/default.yaml --data-path /path/to/processed
 
-# Without NPS Loss (set lambda_nps: 0.0 in config)
+# Without NPS Loss (set nps_start: 0.0, nps_end: 0.0 in config)
 # Without Perceptual Loss (set lambda_perceptual: 0.0 in config)
 ```
 
@@ -318,9 +318,9 @@ Slices are sorted by **Z-coordinate** (not filename index) to handle Head-First/
 
 ```text
 L_total = λ_adv  · L_wasserstein      (1.0)                        — WGAN-GP adversarial
-        + λ_l1   · L_l1               (Cosine Decay: 100.0 → 10.0) — Pixel fidelity
+        + λ_l1   · L_l1               (Cosine Decay: 50.0 → 15.0)  — Pixel fidelity
         + λ_perc · L_perceptual       (10.0)                       — VGG19 feature matching
-        + λ_nps  · L_anatomy_nps      (Cosine Warmup: 5.0 → 25.0)  — ★ Tissue-specific NPS
+        + λ_nps  · L_anatomy_nps      (Cosine Warmup: 2.0 → 15.0)  — ★ Tissue-specific NPS
         + λ_freq · L_frequency        (1.0)                        — Multi-scale FFT
 ```
 
