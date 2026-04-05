@@ -78,13 +78,13 @@ class Trainer:
         self.grad_accum = tc.get("gradient_accumulation", 8)
         self.lambda_gp = config["loss"].get("gradient_penalty", 10.0)
         
-        # Loss weights
+        # Loss weights (L1 and NPS use dynamic scheduling — start values)
         lc = config["loss"]
         self.loss_weights = {
             "adv": lc.get("lambda_adv", 1.0),
-            "l1": lc.get("lambda_l1", 100.0),
+            "l1": lc.get("l1_start", 50.0),
             "perceptual": lc.get("lambda_perceptual", 10.0),
-            "nps": lc.get("lambda_nps", 5.0),
+            "nps": lc.get("nps_start", 2.0),
             "freq": lc.get("lambda_freq", 1.0),
         }
         
@@ -290,6 +290,10 @@ class Trainer:
             loss_nps = loss_nps * self.loss_weights["nps"]
             total_g_loss = total_g_loss + loss_nps
             g_losses["g_nps"] = loss_nps.item() / self.grad_accum
+            # Per-tissue NPS losses → W&B (val is already float from .item() in anatomy_nps)
+            if tissue_losses is not None:
+                for tissue_name, val in tissue_losses.items():
+                    g_losses[f"g_nps_{tissue_name}"] = val / self.grad_accum
 
         scaled_loss = total_g_loss / self.grad_accum
         
@@ -397,18 +401,22 @@ class Trainer:
         print(f"{'='*60}\n")
         
         import math
+        # Dynamic scheduling boundaries from YAML (no hardcoding)
+        lc = self.config["loss"]
+        l1_start = lc.get("l1_start", 50.0)
+        l1_end = lc.get("l1_end", 15.0)
+        nps_start = lc.get("nps_start", 2.0)
+        nps_end = lc.get("nps_end", 15.0)
+
         for epoch in range(self.start_epoch, self.epochs):
-            # Dynamic Loss Weighting (Cosine Decay)
-            # L1: 100.0 -> 10.0
-            # NPS: 5.0 -> 25.0
+            # Dynamic Loss Weighting (Cosine Cross-Fade)
+            # L1: l1_start -> l1_end (anatomy first, then relax)
+            # NPS: nps_start -> nps_end (physics gradually takes over)
             progress = epoch / max(1, self.epochs - 1)
-            cosine_factor = 0.5 * (1 + math.cos(math.pi * progress)) # 1.0 -> 0.0
+            cosine_factor = 0.5 * (1 + math.cos(math.pi * progress))  # 1.0 -> 0.0
 
-            current_l1 = 10.0 + (100.0 - 10.0) * cosine_factor
-            current_nps = 25.0 + (5.0 - 25.0) * cosine_factor
-
-            self.loss_weights["l1"] = current_l1
-            self.loss_weights["nps"] = current_nps
+            self.loss_weights["l1"] = l1_end + (l1_start - l1_end) * cosine_factor
+            self.loss_weights["nps"] = nps_end + (nps_start - nps_end) * cosine_factor
 
             epoch_start = time.time()
             epoch_d_losses = {}

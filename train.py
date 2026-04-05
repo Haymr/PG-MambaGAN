@@ -127,10 +127,9 @@ def build_loss_fns(config: dict) -> dict:
         losses["freq"] = FrequencyLoss()
     
     # Anatomy-Aware NPS
-    if lc.get("lambda_nps", 0) > 0:
+    if lc.get("lambda_nps", 0) > 0 or lc.get("nps_start", 0) > 0:
         losses["nps"] = AnatomyAwareNPSLoss(
             tissue_weights=lc.get("nps_tissue_weights"),
-            patch_size=64,
             n_patches=8,
             close_kernel=lc.get("nps_morphological_kernel", 5),
         )

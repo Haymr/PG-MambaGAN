@@ -10,21 +10,21 @@ Replaces CNN encoder/decoder with VSS (Mamba-based) stages.
 
 Architecture (512×512 input):
     ┌─ Patch Embed ─────────────────────────────────────────┐
-    │  Conv 4×4, s=4 → (B, 96, 128, 128)                   │
+    │  Conv 3×3, s=2, p=1 → (B, 96, 256, 256)              │
     ├─ Encoder ─────────────────────────────────────────────┤
-    │  Stage 1: 2× VSS, dim=96  (128×128) → skip_1         │
+    │  Stage 1: 2× VSS, dim=96  (256×256) → skip_1         │
     │  ↓ PatchMerging                                        │
-    │  Stage 2: 2× VSS, dim=192 (64×64)  → skip_2          │
+    │  Stage 2: 2× VSS, dim=192 (128×128) → skip_2         │
     │  ↓ PatchMerging                                        │
-    │  Stage 3: 4× VSS, dim=384 (32×32)  → skip_3          │
+    │  Stage 3: 4× VSS, dim=384 (64×64)   → skip_3         │
     │  ↓ PatchMerging                                        │
-    │  Stage 4: 2× VSS, dim=768 (16×16)  Bottleneck        │
+    │  Stage 4: 2× VSS, dim=768 (32×32)   Bottleneck       │
     ├─ Decoder ─────────────────────────────────────────────┤
-    │  ↑ PatchExpanding + skip_3 → 4× VSS, dim=384 (32×32) │
-    │  ↑ PatchExpanding + skip_2 → 2× VSS, dim=192 (64×64) │
-    │  ↑ PatchExpanding + skip_1 → 2× VSS, dim=96 (128×128)│
+    │  ↑ PatchExpanding + skip_3 → 4× VSS, dim=384 (64×64) │
+    │  ↑ PatchExpanding + skip_2 → 2× VSS, dim=192(128×128)│
+    │  ↑ PatchExpanding + skip_1 → 2× VSS, dim=96 (256×256)│
     ├─ Head ────────────────────────────────────────────────┤
-    │  TransposeConv → (512×512) + Conv 1×1 → tanh          │
+    │  Bilinear ×2 → Conv 3×3 → Conv 3×3 → tanh            │
     └───────────────────────────────────────────────────────┘
 
 Usage:

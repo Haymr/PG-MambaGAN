@@ -23,10 +23,13 @@ discriminator:
 
 loss:
   lambda_adv: 1.0
-  lambda_l1: 100.0
   lambda_perceptual: 10.0
-  lambda_nps: 5.0
   lambda_freq: 1.0
+  # Dynamic loss scheduling (Cosine Annealing)
+  l1_start: 50.0                   # High early → learn anatomy first
+  l1_end: 15.0                     # Low late → let texture emerge
+  nps_start: 2.0                   # Low early → don't disrupt convergence
+  nps_end: 15.0                    # High late → match CT noise spectrum
   gradient_penalty: 10.0
   nps_tissue_weights:
     soft_tissue: 2.0
