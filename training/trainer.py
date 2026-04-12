@@ -252,6 +252,13 @@ class Trainer:
         self.G.train()
         g_losses = {}
         
+        # ██ CRITICAL: Freeze D to prevent gradient leakage ██
+        # Without this, loss_adv.backward() writes poisoned gradients
+        # into D's .grad buffers (opposite direction of D's own objective),
+        # causing D collapse → G mode collapse → all-black outputs.
+        for p in self.D.parameters():
+            p.requires_grad = False
+        
         with torch.amp.autocast(
             device_type="cuda", dtype=self.amp_dtype, enabled=self.use_amp
         ):
@@ -302,6 +309,10 @@ class Trainer:
             self.scaler_G.scale(scaled_loss).backward()
         else:
             scaled_loss.backward()
+        
+        # ██ CRITICAL: Unfreeze D for its own training steps ██
+        for p in self.D.parameters():
+            p.requires_grad = True
         
         g_losses["g_total"] = scaled_loss.item()
         
