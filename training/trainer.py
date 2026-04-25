@@ -347,8 +347,8 @@ class Trainer:
                 fake = self.G_ema(ldct)
             
             # Convert to numpy for metrics
-            fake_np = fake.cpu().numpy()
-            ndct_np = ndct.cpu().numpy()
+            fake_np = fake.cpu().float().numpy()
+            ndct_np = ndct.cpu().float().numpy()
             
             batch_l1 = 0.0
             batch_l1_hu = 0.0
@@ -457,6 +457,7 @@ class Trainer:
                     epoch_d_losses[k] = epoch_d_losses.get(k, 0) + v
                 
                 if (step + 1) % self.grad_accum == 0 or (step + 1) == len(train_loader):
+                    torch.nn.utils.clip_grad_norm_(self.D.parameters(), max_norm=1.0)
                     if self.use_amp and self.amp_dtype == torch.float16:
                         self.scaler_D.step(self.opt_D)
                         self.scaler_D.update()
@@ -471,6 +472,7 @@ class Trainer:
                         epoch_g_losses[k] = epoch_g_losses.get(k, 0) + v
 
                     if ((step + 1) // self.n_critic) % self.grad_accum == 0 or (step + 1) == len(train_loader):
+                        torch.nn.utils.clip_grad_norm_(self.G.parameters(), max_norm=1.0)
                         if self.use_amp and self.amp_dtype == torch.float16:
                             self.scaler_G.step(self.opt_G)
                             self.scaler_G.update()
@@ -535,7 +537,7 @@ class Trainer:
         torch.cuda.reset_peak_memory_stats()
         
         print(f"\n  GPU: {torch.cuda.get_device_name(0)}")
-        print(f"  VRAM Total: {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB")
+        print(f"  VRAM Total: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
         print(f"  VRAM Allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
     
     # ------------------------------------------------------------------
@@ -576,6 +578,7 @@ class Trainer:
                 **{f"d/{k}": v for k, v in d_losses.items()},
                 **{f"g/{k}": v for k, v in g_losses.items()},
                 **{f"val/{k}": v for k, v in val_metrics.items()},
+                **{f"w/{k}": v for k, v in self.loss_weights.items()},
                 "lr": lr,
                 "epoch": epoch + 1,
             }
@@ -590,27 +593,60 @@ class Trainer:
             wandb.log(log_dict, step=self.global_step)
     
     def _log_sample_images(self, loader, epoch):
-        """Log sample images to W&B."""
+        """Log sample images to W&B using fixed content-rich slices.
+        
+        Uses G_raw (active model) for instant visual feedback.
+        Validation metrics and checkpointing still use G_ema.
+        """
         try:
             import wandb
             
-            batch = next(iter(loader))
-            ldct = batch["ldct"][:4].to(self.device)
-            ndct = batch["ndct"][:4].to(self.device)
+            # Cache a fixed batch on first call so every epoch compares the SAME samples.
+            # Scout multiple batches and pick the 3 slices with highest anatomical content
+            # (highest pixel std → more structure + more visible noise).
+            if not hasattr(self, "_fixed_sample_batch") or self._fixed_sample_batch is None:
+                candidates = []  # list of (score, ldct_slice, ndct_slice)
+                scout_batches = 8
+                for bi, batch in enumerate(loader):
+                    for i in range(batch["ldct"].shape[0]):
+                        score = batch["ldct"][i, 0].std().item()
+                        candidates.append((
+                            score,
+                            batch["ldct"][i:i+1].clone(),
+                            batch["ndct"][i:i+1].clone(),
+                        ))
+                    if bi + 1 >= scout_batches:
+                        break
+                candidates.sort(key=lambda x: -x[0])
+                top3 = candidates[:3]
+                self._fixed_sample_batch = {
+                    "ldct": torch.cat([c[1] for c in top3], dim=0),
+                    "ndct": torch.cat([c[2] for c in top3], dim=0),
+                }
+                print(f"  [sample_log] locked 3 content-rich slices, "
+                      f"std scores: {[f'{c[0]:.3f}' for c in top3]}")
             
+            ldct = self._fixed_sample_batch["ldct"].to(self.device)
+            ndct = self._fixed_sample_batch["ndct"].to(self.device)
+            
+            # Use G_raw (active model) for instant visual feedback.
+            # EMA (decay=0.999) smooths out training noise which is great for
+            # metrics/checkpoints, but for W&B we want to see what G learned NOW.
             with torch.no_grad():
-                fake = self.G_ema(ldct)
+                self.G.eval()
+                fake = self.G(ldct)
+                self.G.train()
             
             # Denormalize [-1,1] → [0,1] for visualization
             images = []
-            for i in range(min(4, ldct.shape[0])):
+            for i in range(min(3, ldct.shape[0])):
                 trio = torch.cat([
                     (ldct[i, 0] + 1) / 2,
                     (fake[i, 0] + 1) / 2,
                     (ndct[i, 0] + 1) / 2,
                 ], dim=1)  # Side by side: LDCT | Denoised | NDCT
                 images.append(wandb.Image(
-                    trio.cpu().numpy(),
+                    trio.cpu().float().numpy(),
                     caption=f"LDCT | Denoised | NDCT"
                 ))
             
