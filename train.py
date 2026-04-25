@@ -111,29 +111,24 @@ def build_discriminator(config: dict) -> torch.nn.Module:
 
 
 def build_loss_fns(config: dict) -> dict:
-    """Build generator loss functions from config."""
-    lc = config.get("loss", {})
+    """Build generator loss functions for every weight named in loss.schedule."""
+    lc = config["loss"]
+    active = set(lc["schedule"].keys())
     losses = {}
-    
-    # L1 (always present)
-    losses["l1"] = L1Loss()
-    
-    # Perceptual
-    if lc.get("lambda_perceptual", 0) > 0:
+
+    if "l1" in active:
+        losses["l1"] = L1Loss()
+    if "perceptual" in active:
         losses["perceptual"] = PerceptualLoss(use_lpips=False)
-    
-    # Frequency
-    if lc.get("lambda_freq", 0) > 0:
+    if "freq" in active:
         losses["freq"] = FrequencyLoss()
-    
-    # Anatomy-Aware NPS
-    if lc.get("lambda_nps", 0) > 0 or lc.get("nps_start", 0) > 0:
+    if "nps" in active:
         losses["nps"] = AnatomyAwareNPSLoss(
             tissue_weights=lc.get("nps_tissue_weights"),
             n_patches=8,
             close_kernel=lc.get("nps_morphological_kernel", 5),
         )
-    
+
     print(f"  Losses: {list(losses.keys())}")
     return losses
 
@@ -159,7 +154,11 @@ def main():
                         help="Path to patient manifest JSON")
     
     args = parser.parse_args()
-    
+
+    # Fixed input shape → let cuDNN pick fastest kernel (10-20% speedup)
+    import torch
+    torch.backends.cudnn.benchmark = True
+
     # ---- Environment ----
     env = Environment()
     print(env.summary())
@@ -197,7 +196,7 @@ def main():
     )
     train_loader = train_dataset.get_dataloader(
         batch_size=tc["batch_size"],
-        num_workers=4 if env.runtime != Environment.COLAB else 2,
+        num_workers=10 if env.runtime != Environment.COLAB else 2,
     )
     
     val_dataset = LDCTDataset(

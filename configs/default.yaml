@@ -6,7 +6,7 @@
 model:
   generator: "vss_unet"          # "vss_unet" or "unet_baseline"
   discriminator: "patchgan_sn"
-  img_size: 512
+  img_size: 256
   channels: 1
 
 generator:
@@ -22,15 +22,7 @@ discriminator:
   use_spectral_norm: true
 
 loss:
-  lambda_adv: 1.0
-  lambda_perceptual: 10.0
-  lambda_freq: 1.0
-  # Dynamic loss scheduling (Cosine Annealing)
-  l1_start: 50.0                   # High early → learn anatomy first
-  l1_end: 15.0                     # Low late → let texture emerge
-  nps_start: 2.0                   # Low early → don't disrupt convergence
-  nps_end: 15.0                    # High late → match CT noise spectrum
-  gradient_penalty: 10.0
+  gradient_penalty: 1.0
   nps_tissue_weights:
     soft_tissue: 2.0
     lung: 1.5
@@ -40,16 +32,37 @@ loss:
   nps_mask_source: "ndct"        # ⚠️ MANDATORY — masking from ground truth
   nps_morphological_kernel: 5    # closing/opening kernel size
 
+  # Per-weight piecewise schedule. type ∈ {constant, linear, cosine}.
+  # Phase 1 (ep 0-5):   pure L1 + perceptual warmup — structure first
+  # Phase 2 (ep 5-20):  adv & NPS ramp in linearly  — introduce texture
+  # Phase 3 (ep 20+):   cosine-anneal L1 down, NPS up — fine-tune realism
+  schedule:
+    l1:
+      - {start_epoch: 0,  end_epoch: 5,   start_val: 50.0, end_val: 50.0, type: constant}
+      - {start_epoch: 5,  end_epoch: 120, start_val: 50.0, end_val: 15.0, type: cosine}
+    adv:
+      - {start_epoch: 0,  end_epoch: 5,   start_val: 0.0,  end_val: 0.0,  type: constant}
+      - {start_epoch: 5,  end_epoch: 20,  start_val: 0.0,  end_val: 1.0,  type: linear}
+      - {start_epoch: 20, end_epoch: 120, start_val: 1.0,  end_val: 1.0,  type: constant}
+    nps:
+      - {start_epoch: 0,  end_epoch: 5,   start_val: 0.0,  end_val: 0.0,  type: constant}
+      - {start_epoch: 5,  end_epoch: 20,  start_val: 0.0,  end_val: 5.0,  type: linear}
+      - {start_epoch: 20, end_epoch: 120, start_val: 5.0,  end_val: 15.0, type: cosine}
+    perceptual:
+      - {start_epoch: 0,  end_epoch: 120, start_val: 10.0, end_val: 10.0, type: constant}
+    freq:
+      - {start_epoch: 0,  end_epoch: 120, start_val: 1.0,  end_val: 1.0,  type: constant}
+
 training:
-  epochs: 200
-  batch_size: 1                  # ⚠️ Physical batch (VRAM-safe)
-  gradient_accumulation: 8       # ⚠️ Effective batch = 1×8 = 8
+  epochs: 120
+  batch_size: 32
+  gradient_accumulation: 1
   learning_rate_g: 1.0e-4
   learning_rate_d: 1.0e-4
   beta1: 0.0
   beta2: 0.99
   n_critic: 5
-  ema_decay: 0.999
+  ema_decay: 0.99
   mixed_precision: true          # ⚠️ BFloat16 AMP
   precision_dtype: "bfloat16"    # "bfloat16" or "float16"
   scheduler: "cosine"
@@ -79,5 +92,5 @@ paths:
 wandb:
   project: "pg-mambagan"
   entity: null
-  log_images_every: 10
+  log_images_every: 1
   log_gradients: true

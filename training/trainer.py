@@ -79,14 +79,12 @@ class Trainer:
         self.grad_accum = tc.get("gradient_accumulation", 8)
         self.lambda_gp = config["loss"].get("gradient_penalty", 10.0)
         
-        # Loss weights (L1 and NPS use dynamic scheduling — start values)
+        # Loss weights — driven by per-weight piecewise schedules (see YAML loss.schedule)
         lc = config["loss"]
+        self.loss_schedules = lc["schedule"]
         self.loss_weights = {
-            "adv": lc.get("lambda_adv", 1.0),
-            "l1": lc.get("l1_start", 50.0),
-            "perceptual": lc.get("lambda_perceptual", 10.0),
-            "nps": lc.get("nps_start", 2.0),
-            "freq": lc.get("lambda_freq", 1.0),
+            name: self._evaluate_schedule(segs, 0)
+            for name, segs in self.loss_schedules.items()
         }
         
         # ══════════════════════════════════════════════
@@ -146,11 +144,37 @@ class Trainer:
         from torch.optim.lr_scheduler import (
             CosineAnnealingLR, LinearLR, SequentialLR
         )
-        
+
         warmup = LinearLR(optimizer, start_factor=0.01, total_iters=warmup_epochs)
-        cosine = CosineAnnealingLR(optimizer, T_max=self.epochs - warmup_epochs)
-        
+        cosine = CosineAnnealingLR(optimizer, T_max=max(1, self.epochs - warmup_epochs))
+
         return SequentialLR(optimizer, [warmup, cosine], milestones=[warmup_epochs])
+
+    @staticmethod
+    def _evaluate_schedule(segments, epoch):
+        """Piecewise loss-weight schedule: list of {start_epoch, end_epoch, start_val, end_val, type}."""
+        import math
+        if epoch < segments[0]["start_epoch"]:
+            return segments[0]["start_val"]
+        for i, seg in enumerate(segments):
+            s, e = seg["start_epoch"], seg["end_epoch"]
+            if epoch >= e:
+                if i == len(segments) - 1:
+                    return seg["end_val"]
+                continue
+            if epoch < s:
+                return segments[i - 1]["end_val"] if i > 0 else seg["start_val"]
+            sv, ev = seg["start_val"], seg["end_val"]
+            t = (epoch - s) / max(1, e - s)
+            stype = seg.get("type", "linear")
+            if stype == "constant":
+                return sv
+            if stype == "linear":
+                return sv + (ev - sv) * t
+            if stype == "cosine":
+                return ev + (sv - ev) * 0.5 * (1 + math.cos(math.pi * t))
+            raise ValueError(f"Unknown schedule type: {stype}")
+        return segments[-1]["end_val"]
     
     # ------------------------------------------------------------------
     # W&B
@@ -344,8 +368,8 @@ class Trainer:
                 fake = self.G_ema(ldct)
             
             # Convert to numpy for metrics
-            fake_np = fake.cpu().numpy()
-            ndct_np = ndct.cpu().numpy()
+            fake_np = fake.cpu().float().numpy()
+            ndct_np = ndct.cpu().float().numpy()
             
             batch_l1 = 0.0
             batch_l1_hu = 0.0
@@ -412,23 +436,11 @@ class Trainer:
         print(f"  n-critic: {self.n_critic}")
         print(f"{'='*60}\n")
         
-        import math
-        # Dynamic scheduling boundaries from YAML (no hardcoding)
-        lc = self.config["loss"]
-        l1_start = lc.get("l1_start", 50.0)
-        l1_end = lc.get("l1_end", 15.0)
-        nps_start = lc.get("nps_start", 2.0)
-        nps_end = lc.get("nps_end", 15.0)
-
         for epoch in range(self.start_epoch, self.epochs):
-            # Dynamic Loss Weighting (Cosine Cross-Fade)
-            # L1: l1_start -> l1_end (anatomy first, then relax)
-            # NPS: nps_start -> nps_end (physics gradually takes over)
-            progress = epoch / max(1, self.epochs - 1)
-            cosine_factor = 0.5 * (1 + math.cos(math.pi * progress))  # 1.0 -> 0.0
-
-            self.loss_weights["l1"] = l1_end + (l1_start - l1_end) * cosine_factor
-            self.loss_weights["nps"] = nps_end + (nps_start - nps_end) * cosine_factor
+            for name, segs in self.loss_schedules.items():
+                self.loss_weights[name] = self._evaluate_schedule(segs, epoch)
+            weights_str = " ".join(f"{k}={v:.3g}" for k, v in self.loss_weights.items())
+            print(f"  Loss weights (epoch {epoch+1}): {weights_str}")
 
             epoch_start = time.time()
             epoch_d_losses = {}
@@ -454,6 +466,7 @@ class Trainer:
                     epoch_d_losses[k] = epoch_d_losses.get(k, 0) + v
                 
                 if (step + 1) % self.grad_accum == 0 or (step + 1) == len(train_loader):
+                    torch.nn.utils.clip_grad_norm_(self.D.parameters(), max_norm=1.0)
                     if self.use_amp and self.amp_dtype == torch.float16:
                         self.scaler_D.step(self.opt_D)
                         self.scaler_D.update()
@@ -468,6 +481,7 @@ class Trainer:
                         epoch_g_losses[k] = epoch_g_losses.get(k, 0) + v
 
                     if ((step + 1) // self.n_critic) % self.grad_accum == 0 or (step + 1) == len(train_loader):
+                        torch.nn.utils.clip_grad_norm_(self.G.parameters(), max_norm=1.0)
                         if self.use_amp and self.amp_dtype == torch.float16:
                             self.scaler_G.step(self.opt_G)
                             self.scaler_G.update()
@@ -532,7 +546,7 @@ class Trainer:
         torch.cuda.reset_peak_memory_stats()
         
         print(f"\n  GPU: {torch.cuda.get_device_name(0)}")
-        print(f"  VRAM Total: {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB")
+        print(f"  VRAM Total: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
         print(f"  VRAM Allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
     
     # ------------------------------------------------------------------
@@ -573,6 +587,7 @@ class Trainer:
                 **{f"d/{k}": v for k, v in d_losses.items()},
                 **{f"g/{k}": v for k, v in g_losses.items()},
                 **{f"val/{k}": v for k, v in val_metrics.items()},
+                **{f"w/{k}": v for k, v in self.loss_weights.items()},
                 "lr": lr,
                 "epoch": epoch + 1,
             }
@@ -590,14 +605,42 @@ class Trainer:
         """Log sample images to W&B."""
         try:
             import wandb
-            
-            batch = next(iter(loader))
-            ldct = batch["ldct"][:4].to(self.device)
-            ndct = batch["ndct"][:4].to(self.device)
-            
+
+            # Cache a fixed batch on first call so every epoch compares the SAME samples.
+            # Scout multiple batches and pick the 3 slices with highest anatomical content
+            # (highest pixel std → more structure + more visible noise).
+            if not hasattr(self, "_fixed_sample_batch") or self._fixed_sample_batch is None:
+                candidates = []  # list of (score, ldct_slice, ndct_slice)
+                scout_batches = 8
+                for bi, batch in enumerate(loader):
+                    for i in range(batch["ldct"].shape[0]):
+                        score = batch["ldct"][i, 0].std().item()
+                        candidates.append((
+                            score,
+                            batch["ldct"][i:i+1].clone(),
+                            batch["ndct"][i:i+1].clone(),
+                        ))
+                    if bi + 1 >= scout_batches:
+                        break
+                candidates.sort(key=lambda x: -x[0])
+                top3 = candidates[:3]
+                self._fixed_sample_batch = {
+                    "ldct": torch.cat([c[1] for c in top3], dim=0),
+                    "ndct": torch.cat([c[2] for c in top3], dim=0),
+                }
+                print(f"  [sample_log] locked 3 content-rich slices, "
+                      f"std scores: {[f'{c[0]:.3f}' for c in top3]}")
+
+            ldct = self._fixed_sample_batch["ldct"].to(self.device)
+            ndct = self._fixed_sample_batch["ndct"].to(self.device)
+
+            # DIAG: sample with G_raw instead of G_ema to see actual trained weights
+            # (EMA decay=0.999 masks learning for ~1000 steps)
             with torch.no_grad():
-                fake = self.G_ema(ldct)
-            
+                self.G.eval()
+                fake = self.G(ldct)
+                self.G.train()
+
             # Denormalize [-1,1] → [0,1] for visualization
             images = []
             for i in range(min(4, ldct.shape[0])):
@@ -610,7 +653,7 @@ class Trainer:
                     trio.cpu().numpy(),
                     caption=f"LDCT | Denoised | NDCT"
                 ))
-            
+
             wandb.log({"samples": images}, step=self.global_step)
         except Exception:
             pass

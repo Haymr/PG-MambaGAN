@@ -1,5 +1,13 @@
 # PG-MambaGAN
 
+# Claude Code
+.claude/
+CLAUDE.md
+.claude.json
+COLLAPSE_DIAGNOSIS.md
+literatur_taramasi.md
+git_log_output.txt
+
 # Python
 __pycache__/
 *.py[cod]

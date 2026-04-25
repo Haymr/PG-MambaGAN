@@ -106,11 +106,9 @@ class LDCTDataset(Dataset):
         if ndct.ndim == 3:
             ndct = ndct[:, :, 0] if ndct.shape[-1] == 1 else ndct[0]
         
-        # Explicitly clip to [-1000, 1000] and normalize to [-1.0, 1.0]
-        ldct = np.clip(ldct, -1000.0, 1000.0)
-        ndct = np.clip(ndct, -1000.0, 1000.0)
-        ldct = (ldct + 1000.0) / 2000.0 * 2.0 - 1.0
-        ndct = (ndct + 1000.0) / 2000.0 * 2.0 - 1.0
+        # Data is already normalized to [-1.0, 1.0] by preprocess.py
+        ldct = np.clip(ldct, -1.0, 1.0)
+        ndct = np.clip(ndct, -1.0, 1.0)
 
         # Apply augmentations
         if self.augment:
@@ -199,6 +197,7 @@ class LDCTDataset(Dataset):
             pin_memory=pin_memory and torch.cuda.is_available(),
             drop_last=drop_last and (self.split == "train"),
             persistent_workers=num_workers > 0,
+            prefetch_factor=4 if num_workers > 0 else None,
         )
     
     # ------------------------------------------------------------------

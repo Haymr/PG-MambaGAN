@@ -96,7 +96,7 @@ class Environment:
                 info["cuda_version"] = torch.version.cuda
                 
                 # VRAM in GB
-                total_mem = torch.cuda.get_device_properties(0).total_mem
+                total_mem = torch.cuda.get_device_properties(0).total_memory
                 info["vram_gb"] = round(total_mem / (1024 ** 3), 1)
         except ImportError:
             pass

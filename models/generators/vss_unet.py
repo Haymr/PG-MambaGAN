@@ -203,6 +203,9 @@ class VSSUNet(nn.Module):
         
         # Initialize weights
         self.apply(self._init_weights)
+        # Tanh output layer: small init so output starts near 0 (gray)
+        nn.init.xavier_normal_(self.final_upsample[-2].weight, gain=1.0)
+        nn.init.zeros_(self.final_upsample[-2].bias)
     
     def _init_weights(self, m):
         """Weight initialization."""

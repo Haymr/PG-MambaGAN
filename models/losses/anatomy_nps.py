@@ -388,9 +388,8 @@ class AnatomyAwareNPSLoss(nn.Module):
         fft = torch.fft.fft2(patches)
         fft_shifted = torch.fft.fftshift(fft)
         
-        # Power spectrum: |FFT|²
+        # Power spectrum: |FFT|² (AAPM TG-233: raw power, no log compression)
         power = (fft_shifted.real ** 2 + fft_shifted.imag ** 2) / (ps * ps)
-        power = torch.log1p(power)
 
         center = ps // 2
 
