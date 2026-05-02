@@ -390,7 +390,6 @@ class AnatomyAwareNPSLoss(nn.Module):
         
         # Power spectrum: |FFT|²
         power = (fft_shifted.real ** 2 + fft_shifted.imag ** 2) / (ps * ps)
-        power = torch.log1p(power)
 
         center = ps // 2
 
@@ -492,8 +491,12 @@ class AnatomyAwareNPSLoss(nn.Module):
                 nps_pred = self._compute_nps(pred_patches)
                 nps_ndct = self._compute_nps(ndct_patches)
 
-                # ██ Step 6: L2 loss between NPS curves for this scale ██
-                nps_diff = F.mse_loss(nps_pred, nps_ndct)
+                # Shape normalization — compare unit-integral profiles, not magnitudes
+                nps_pred = nps_pred / (nps_pred.sum() + 1e-8)
+                nps_ndct = nps_ndct / (nps_ndct.sum() + 1e-8)
+
+                # ██ Step 6: L1 loss between normalized NPS curves ██
+                nps_diff = F.l1_loss(nps_pred, nps_ndct)
                 tissue_loss_sum += nps_diff
                 scales_valid += 1
 

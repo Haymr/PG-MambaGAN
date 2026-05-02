@@ -41,15 +41,15 @@ loss:
   nps_morphological_kernel: 5    # closing/opening kernel size
 
 training:
-  epochs: 200
-  batch_size: 1                  # ⚠️ Physical batch (VRAM-safe)
-  gradient_accumulation: 8       # ⚠️ Effective batch = 1×8 = 8
+  epochs: 120
+  batch_size: 8                  # ⚠️ Physical batch (VRAM-safe)
+  gradient_accumulation: 1       # ⚠️ Effective batch = 8×1 = 8
   learning_rate_g: 1.0e-4
   learning_rate_d: 1.0e-4
   beta1: 0.0
   beta2: 0.99
   n_critic: 5
-  ema_decay: 0.999
+  ema_decay: 0.99
   mixed_precision: true          # ⚠️ BFloat16 AMP
   precision_dtype: "bfloat16"    # "bfloat16" or "float16"
   scheduler: "cosine"
@@ -79,5 +79,5 @@ paths:
 wandb:
   project: "pg-mambagan"
   entity: null
-  log_images_every: 10
+  log_images_every: 1
   log_gradients: true

@@ -1,355 +1,121 @@
-# PG-MambaGAN
+# PG-MambaGAN — `local-fixes-512` Branch
 
-> **Physics-Guided Mamba-GAN for Low-Dose CT Denoising**
->
-> *The first framework unifying Visual State Space (Mamba) architecture,
-> WGAN-GP adversarial stability, and Anatomy-Aware Noise Power Spectrum loss
-> for clinically validated CT denoising with hallucination risk control.*
+Bu branch, `main` üzerinde 512×512 batch=8 eğitiminin stabilize edilmesi için yapılan düzeltmeleri içerir.
+
+> **Not:** Projenin bilimsel/teorik anlatımı için `main` branch'indeki README'ye bakınız. Bu README sadece bu branch'te yapılan değişiklikleri belgeler.
 
 ---
 
-## 🔬 Scientific Contribution
+## 📊 Doğrulama
 
-PG-MambaGAN introduces three novel contributions to low-dose CT denoising:
-
-| Contribution | Status Quo | Our Approach |
+| Metrik | Önceki Çöküş | Bu Branch (Epoch 8) |
 |---|---|---|
-| **Architecture** | CNN (U-Net) bottleneck | Full VSS-U-Net — Mamba SSM at every encoder/decoder stage |
-| **Loss Function** | Global pixel-wise L1/L2 | **Anatomy-Aware NPS** — tissue-specific spectral matching via NDCT-guided masking |
-| **Validation** | PSNR/SSIM only | 3D volumetric continuity + radiomic hallucination testing + clinical task validation |
+| HU PSNR | 15.16 dB | **31.44 dB** (+16 dB) |
+| Val L1_HU | 279.1 | 47.8 |
+| GP | 4202 (patladı) | 0.019 (Lipschitz-1) |
+| D real / fake | dengesiz | 0.0066 / 0.0064 (denge) |
 
-### Key Design Decisions
-- **NDCT-Only Masking**: Tissue segmentation masks derived exclusively from normal-dose ground truth — never from noisy LDCT or model predictions
-- **Gradient-Safe Masks**: All mask tensors `detach()`ed from the computational graph — gradients flow through predictions, not mask boundaries
-- **Morphological Cleanup**: Binary closing (5×5) → opening (3×3) eliminates noise-induced mask artifacts
+`λ_gp=10.0` korundu — Spectral Norm + GP=10 kombinasyonu 8 epoch'ta `‖∇D‖ → 1`'e yakınsadı.
 
 ---
 
-## 🏗️ Architecture
+## 🐛 Bug Fix'ler
 
-### VSS-U-Net Generator
+### `data/dataset.py`
+Çift HU normalizasyonu kaldırıldı. NPY'ler önişlemeden zaten `[-1,1]` aralığında geliyor; class onları HU varsayıp tekrar normalize ediyordu, veri dağılımı bozuluyordu.
 
-```
-LDCT (1, 512, 512)
-  │
-  ├─ Patch Embed ─── Conv 3×3, stride 2, pad 1 ──→ (96, 256, 256)
-  │
-  ├─ Encoder ──────────────────────────────────────────────
-  │  Stage 1:  2× VSS Block, dim=96   (256×256) ──→ skip₁
-  │  ↓ PatchMerging
-  │  Stage 2:  2× VSS Block, dim=192  (128×128) ──→ skip₂
-  │  ↓ PatchMerging
-  │  Stage 3:  4× VSS Block, dim=384  (64×64)   ──→ skip₃
-  │  ↓ PatchMerging
-  │  Stage 4:  2× VSS Block, dim=768  (32×32)   Bottleneck
-  │
-  ├─ Decoder ──────────────────────────────────────────────
-  │  ↑ PatchExpanding + skip₃ → 4× VSS, dim=384  (64×64)
-  │  ↑ PatchExpanding + skip₂ → 2× VSS, dim=192  (128×128)
-  │  ↑ PatchExpanding + skip₁ → 2× VSS, dim=96   (256×256)
-  │
-  └─ Head ─── Bilinear Upsample → Conv 3×3 → Conv 3×3 → Tanh
-               ──→ Denoised (1, 512, 512)
+```diff
+- ldct = np.clip(ldct, -1000.0, 1000.0)
+- ldct = (ldct + 1000.0) / 2000.0 * 2.0 - 1.0
++ ldct = np.clip(ldct, -1.0, 1.0)
 ```
 
-Each **VSS Block** performs 4-way 2D Selective Scan (SS2D) via `mamba-ssm`:
-- Uses **Spatially Coherent Z-shaped Scanning** (Snake Scan) instead of default raster scans to preserve spatial continuity of non-linear medical structures.
-- Z-scan (→↓), Reverse Z-scan (←↑), Column Z-scan (↓→), Reverse Column Z-scan (↑←)
-- O(n) complexity vs O(n²) for self-attention
+### `models/generators/vss_unet.py`
+Tanh öncesi son Conv'un init'i değiştirildi. `gain=0.1` başlangıç çıktısını sıfıra yapıştırıyor, generator gradyan alamıyordu.
 
-### Anatomy-Aware NPS Loss Pipeline
-
+```diff
+- nn.init.xavier_uniform_(self.final_upsample[-2].weight, gain=0.1)
++ nn.init.xavier_normal_(self.final_upsample[-2].weight, gain=1.0)
 ```
-NDCT (Ground Truth)                    Predicted (Generator Output)
-        │                                       │
-        ▼                                       │
-  ┌─ HU Denormalize ─┐                         │
-  │  [-1,1] → HU     │                         │
-  └───────┬───────────┘                         │
-          ▼                                     │
-  ┌─ HU Thresholding ─────────────────┐         │
-  │  Air < -900 | Lung -900~-500      │         │
-  │  Fat -500~-100 | Soft -100~300    │         │
-  │  Bone ≥ 300                       │         │
-  └───────┬───────────────────────────┘         │
-          ▼                                     │
-  ┌─ Morphological Cleanup ───────────┐         │
-  │  Closing (5×5) → Opening (3×3)    │         │
-  │  Min area filter (64 px)          │         │
-  └───────┬───────────────────────────┘         │
-          ▼                                     │
-  ┌─ AAPM TG-233 Homogeneity Filter ──┐         │
-  │  3x3 Sobel Gradient Magnitude     │         │
-  │  Fat (<0.02) | Soft (<0.04)       │         │
-  │  Lung (<0.08)                     │         │
-  │  *Reject patches with anatomy*    │         │
-  └───────┬───────────────────────────┘         │
-          ▼                                     │
-   Tissue Masks (.detach())  ───────────┬───────┘
-          │                             │
-          ▼                             ▼
-    NDCT ⊙ Mask                  Pred ⊙ Mask
-          │                             │
-          ▼                             ▼
-    NPS(NDCT)                    NPS(Pred)     ← Stride=ps + 1st-Order Plane Detrending → 2D FFT → Radial Avg
-          │                             │
-          └──────── L₂ Loss ────────────┘
-                      ×
-              Tissue Weight (w_soft=2.0, w_lung=1.5, w_bone=0.0)
+
+### `setup/environment.py`
+CUDA API tipo: `total_mem` → `total_memory`. Environment self-test artık çökmüyor.
+
+```diff
+- total_mem = torch.cuda.get_device_properties(0).total_mem
++ total_mem = torch.cuda.get_device_properties(0).total_memory
 ```
 
 ---
 
-## 📁 Project Structure
+## 🎯 Algoritmik İyileştirme
 
-```
-PG-MambaGAN/
-├── configs/
-│   └── default.yaml              # VRAM-optimized training config
-├── data/
-│   ├── dataset.py                # PyTorch Dataset + augmentation
-│   └── patient_manifest.py       # Patient-level split (zero leakage)
-├── models/
-│   ├── generators/
-│   │   ├── vss_block.py          # SS2D + Mamba SSM kernel
-│   │   ├── vss_unet.py           # Full VSS-U-Net generator
-│   │   └── unet_baseline.py   # CNN baseline (ablation)
-│   ├── discriminators/
-│   │   └── patch_disc.py      # SN-PatchGAN (WGAN-GP)
-│   └── losses/
-│       ├── anatomy_nps.py        # ★ Anatomy-Aware NPS Loss
-│       ├── frequency_loss.py       # Multi-scale FFT loss
-│       ├── perceptual_loss.py      # VGG19 + LPIPS
-│       └── standard_loss.py        # L1, Wasserstein, GP
-├── training/
-│   └── trainer.py             # VRAM-optimized WGAN-GP trainer
-├── evaluation/
-│   ├── metrics.py                # 2D + 3D metrics
-│   ├── volumetric.py             # 3D NIfTI assembly
-│   ├── hallucination.py          # Radiomic preservation test
-│   └── clinical_task.py          # EPI + CNR validation
-├── setup/
-│   ├── environment.py            # Dual-env detection + VRAM profiling
-│   └── colab_setup.py            # One-click Colab setup
+### `models/losses/anatomy_nps.py`
+NPS loss yeniden tasarlandı:
 
-├── notebooks/
-│   └── train_colab.ipynb         # Google Colab training notebook
-├── preprocess.py                 # DICOM → NPY (512×512) + metadata
-├── train.py                      # Training entry point
-├── evaluate.py                   # Full evaluation pipeline
-└── requirements.txt              # PyTorch ecosystem
+- `torch.log1p(power)` kaldırıldı (magnitude'u eziyordu)
+- Unit-integral shape normalization eklendi (`nps / nps.sum()`)
+- MSE → L1 (outlier'a robust, AAPM TG-233 ruhuna uygun)
+
+```diff
+- power = torch.log1p(power)
+...
+- nps_diff = F.mse_loss(nps_pred, nps_ndct)
++ nps_pred = nps_pred / (nps_pred.sum() + 1e-8)
++ nps_ndct = nps_ndct / (nps_ndct.sum() + 1e-8)
++ nps_diff = F.l1_loss(nps_pred, nps_ndct)
 ```
 
 ---
 
-## ⚡ Quick Start
+## ⚙️ Tuning
 
-### Prerequisites
+### `configs/default.yaml`
+Eğitim parametreleri güncellendi:
 
-- Python 3.9+
-- CUDA 11.8+ (required for `mamba-ssm`)
-- GPU with ≥16GB VRAM (T4 minimum, A100 recommended)
-
-### Installation
-
-```bash
-# Clone
-git clone https://github.com/Haymr/PG-MambaGAN.git
-cd PG-MambaGAN
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Install Mamba SSM (requires CUDA)
-pip install causal-conv1d>=1.2.0
-pip install mamba-ssm>=1.2.0
-```
-
-> **⚠️ Mamba CUDA Compilation**: `mamba-ssm` requires a CUDA toolkit matching your
-> PyTorch CUDA version. On Colab, run `python setup/colab_setup.py` for automatic setup.
-
-### Google Colab
-
-```python
-# In a Colab notebook cell:
-!git clone https://github.com/Haymr/PG-MambaGAN.git
-%cd PG-MambaGAN
-!python setup/colab_setup.py
-```
-
-Or use the pre-built notebook: `notebooks/train_colab.ipynb`
-
----
-
-## 🔧 Usage
-
-### 1. Preprocess DICOM Data
-
-```bash
-# Mayo Clinic dataset (512×512, patient-level manifest)
-python preprocess.py \
-    --input-dir /path/to/LDCT-and-Projection-data \
-    --output-dir /path/to/processed \
-    --img-size 512 \
-    --create-manifest
-
-# PhantomX external dataset
-python preprocess.py \
-    --input-dir /path/to/phantomx \
-    --output-dir /path/to/phantomx_processed \
-    --dataset-type phantomx \
-    --create-manifest
-```
-
-### 2. Train
-
-```bash
-# Full VSS-U-Net training (VRAM-optimized)
-python train.py \
-    --config configs/default.yaml \
-    --data-path /path/to/processed
-
-# Resume from checkpoint
-python train.py \
-    --config configs/default.yaml \
-    --data-path /path/to/processed \
-    --resume experiments/checkpoints/latest.pth
-
-# Override VRAM settings (e.g., for A100)
-python train.py \
-    --config configs/default.yaml \
-    --data-path /path/to/processed \
-    --batch-size 4 \
-    --accumulation 2
-```
-
-### 3. Evaluate
-
-```bash
-# Full Q1-grade evaluation pipeline
-python evaluate.py \
-    --checkpoint experiments/checkpoints/best.pth \
-    --data-path /path/to/processed \
-    --output-dir experiments/evaluation
-
-# Skip specific evaluations
-python evaluate.py \
-    --checkpoint experiments/checkpoints/best.pth \
-    --data-path /path/to/processed \
-    --skip-hallucination \
-    --skip-clinical
-```
-
-### 4. Ablation Study
-
-```bash
-# CNN Baseline (standard U-Net for comparison)
-# Edit configs/default.yaml: generator: "unet_baseline"
-python train.py --config configs/default.yaml --data-path /path/to/processed
-
-# Without NPS Loss (set nps_start: 0.0, nps_end: 0.0 in config)
-# Without Perceptual Loss (set lambda_perceptual: 0.0 in config)
-```
-
----
-
-## 📊 VRAM Optimization
-
-PG-MambaGAN implements three VRAM management strategies to enable
-512×512 VSS-U-Net training on consumer GPUs (16GB):
-
-| Strategy | VRAM Savings | Config Key |
+| Parametre | Eski | Yeni |
 |---|---|---|
-| **BFloat16 AMP** | ~40% | `training.mixed_precision: true` |
-| **Gradient Checkpointing** | ~60% | `generator.gradient_checkpointing: true` |
-| **Gradient Accumulation** | Batch-independent | `training.gradient_accumulation: 8` |
+| `epochs` | 200 | 120 |
+| `batch_size` | 1 | 8 |
+| `gradient_accumulation` | 8 | 1 |
+| `ema_decay` | 0.999 | 0.99 |
+| `log_images_every` | 10 | 1 |
 
-> **Critical**: WGAN-GP's Gradient Penalty is computed **outside** the AMP autocast
-> scope in pure FP32 to prevent NaN from second-order gradient computation.
-> 
-> **Stability Core Fixes**: The PyTorch trainer overrides native `requires_grad` rules to prevent silent `gradient_checkpointing` graph disconnections (freezing), and explicitly synchronizes `G_ema` module buffers to prevent running metric validation drift across epochs.
-
-### Recommended VRAM Configurations
-
-| GPU | VRAM | batch_size | accumulation | Effective Batch |
-|---|---|---|---|---|
-| T4 | 16 GB | 1 | 8 | 8 |
-| RTX 3080 | 10 GB | 1 | 8 | 8 |
-| A100 | 40 GB | 4 | 2 | 8 |
-| A100 | 80 GB | 8 | 1 | 8 |
+> Effective batch aynı (8), ama accumulation overhead'i kalktı → hız artışı.
+> EMA decay düşürmesi sample log gecikme sorununu çözdü.
 
 ---
 
-## 🔬 Evaluation Pipeline
+## 🗑️ Cleanup
 
-The evaluation pipeline produces four categories of evidence:
-
-1. **2D Per-Slice**: PSNR, SSIM, RMSE, MAE (computed with body contouring masks to prevent background air inflation)
-   *Note: MAE (L1) and Best Checkpoint saving dynamically use a dual-logging system (Normalized Space vs Physical Hounsfield Space) for direct clinical interpretability.*
-2. **3D Volumetric**: Multi-planar (Axial, Coronal, Sagittal) 3D-SSIM/3D-PSNR, plus **Flickering Index** (z-axis continuity)
-3. **Hallucination Risk**: Radiomic feature preservation (First Order, forced 2D-GLCM, GLRLM)
-4. **Clinical Validity**: Edge Preservation Index (EPI), Contrast-to-Noise Ratio (CNR)
-
-All 3D volumes are exported as NIfTI (`.nii.gz`) with DICOM-derived affine matrices
-preserving `PixelSpacing`, `SliceThickness`, and `ImagePositionPatient` metadata.
-Slices are sorted by **Z-coordinate** (not filename index) to handle Head-First/Feet-First orientation differences.
+### `setup/colab_setup.py` (163 satır, **silindi**)
+Aynı `total_mem` tipo'su burada da vardı. Proje WSL'e taşındığı için Colab setup'ı artık aktif kullanımda değil. Çift bakım yükü temizlendi.
 
 ---
 
-## 📦 Dependencies
+## 📝 Yeni Dokümantasyon
 
-| Package | Version | Purpose |
-|---|---|---|
-| `torch` | ≥2.1.0 | Core framework |
-| `mamba-ssm` | ≥1.2.0 | Selective State Space kernel (CUDA required) |
-| `causal-conv1d` | ≥1.2.0 | Causal convolution for Mamba |
-| `monai` | ≥1.3.0 | Medical image transforms |
-| `nibabel` | ≥5.0.0 | NIfTI I/O with affine preservation |
-| `pyradiomics` | ≥3.1.0 | Radiomic feature extraction |
-| `wandb` | ≥0.15.0 | Experiment tracking |
-| `scikit-image` | ≥0.21.0 | SSIM, PSNR metrics |
-| `pydicom` | ≥2.4.0 | DICOM preprocessing |
-| `opencv-python` | ≥4.8.0 | Image resizing |
-| `lpips` | ≥0.1.4 | Perceptual similarity (optional) |
+| Dosya | İçerik |
+|---|---|
+| `CLAUDE.md` | Eğitim çöküş notları ve teşhis durumu |
+| `COLLAPSE_DIAGNOSIS.md` | 8 adımlık kök-neden analizi |
+| `tez_raporu_taslak.md` | ~12k kelime, 9 bölüm tez taslağı |
 
 ---
 
-## 📄 Total Loss Function
+## 📋 Değişen Dosyaların Özeti
 
-```text
-L_total = λ_adv  · L_wasserstein      (1.0)                        — WGAN-GP adversarial
-        + λ_l1   · L_l1               (Cosine Decay: 50.0 → 15.0)  — Pixel fidelity
-        + λ_perc · L_perceptual       (10.0)                       — VGG19 feature matching
-        + λ_nps  · L_anatomy_nps      (Cosine Warmup: 2.0 → 15.0)  — ★ Tissue-specific NPS
-        + λ_freq · L_frequency        (1.0)                        — Multi-scale FFT
+```
+configs/default.yaml          | 10 +-       (tuning)
+data/dataset.py               |  8 +-       (bug fix)
+models/generators/vss_unet.py |  2 +-       (bug fix)
+models/losses/anatomy_nps.py  |  9 +-       (algoritma)
+setup/environment.py          |  2 +-       (bug fix)
+setup/colab_setup.py          | 163 ---     (silindi)
+README.md                     | yeni içerik (bu dosya)
+CLAUDE.md                     | yeni        (notlar)
+COLLAPSE_DIAGNOSIS.md         | yeni        (teşhis)
+tez_raporu_taslak.md          | yeni        (tez)
 ```
 
-> **Dynamic Loss Weighting:** To prevent simple L1 pixel loss from dominating the early training phase, the L1 weight dynamically decreases while the Anatomy-Aware NPS weight increases over time. This enables early-stage structural alignment followed by late-stage fine-grained tissue texture learning.
-
----
-
-## 📖 Citation
-
-```bibtex
-@article{pg-mambagan-2026,
-  title={PG-MambaGAN: Physics-Guided Visual State Space GAN for 
-         Anatomy-Aware Low-Dose CT Denoising},
-  author={[Authors]},
-  journal={[Target: IEEE TMI / Medical Image Analysis]},
-  year={2026}
-}
-```
-
----
-
-## 🙏 Acknowledgments
-
-- Mayo Clinic for the [LDCT-and-Projection-data](https://wiki.cancerimagingarchive.net/display/Public/LDCT-and-Projection-data) dataset
-- [VMamba](https://github.com/MzeroMiko/VMamba) for Visual State Space inspiration
-- [mamba-ssm](https://github.com/state-spaces/mamba) for the selective scan CUDA kernel
-
----
-
-## 📜 License
-
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+**Toplam:** 6 dosya değişti, 1 silindi, 4 yeni dosya eklendi.

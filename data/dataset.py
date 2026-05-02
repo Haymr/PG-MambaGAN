@@ -106,11 +106,9 @@ class LDCTDataset(Dataset):
         if ndct.ndim == 3:
             ndct = ndct[:, :, 0] if ndct.shape[-1] == 1 else ndct[0]
         
-        # Explicitly clip to [-1000, 1000] and normalize to [-1.0, 1.0]
-        ldct = np.clip(ldct, -1000.0, 1000.0)
-        ndct = np.clip(ndct, -1000.0, 1000.0)
-        ldct = (ldct + 1000.0) / 2000.0 * 2.0 - 1.0
-        ndct = (ndct + 1000.0) / 2000.0 * 2.0 - 1.0
+        # Data is already preprocessed to [-1, 1] — only safety clip
+        ldct = np.clip(ldct, -1.0, 1.0)
+        ndct = np.clip(ndct, -1.0, 1.0)
 
         # Apply augmentations
         if self.augment:
