@@ -209,7 +209,7 @@ class VSSUNet(nn.Module):
         # ve "beyaz noktalar" artefaktı üretir. Xavier (gain=0.1) ile
         # başlangıç çıkışı ≈ 0 (uniform gri) olur — yumuşak bir başlangıç.
         # final_upsample[-2] = son Conv2d(48, 1, k=3), [-1] = Tanh()
-        nn.init.xavier_uniform_(self.final_upsample[-2].weight, gain=0.1)
+        nn.init.xavier_normal_(self.final_upsample[-2].weight, gain=1.0)
         if self.final_upsample[-2].bias is not None:
             nn.init.zeros_(self.final_upsample[-2].bias)
     
