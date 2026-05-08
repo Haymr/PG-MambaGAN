@@ -48,7 +48,7 @@ LDCT (1, 512, 512)
   │  ↑ PatchExpanding + skip₂ → 2× VSS, dim=192  (128×128)
   │  ↑ PatchExpanding + skip₁ → 2× VSS, dim=96   (256×256)
   │
-  └─ Head ─── Bilinear Upsample → Conv 3×3 → Conv 3×3 → Tanh
+  └─ Head ─── Bilinear Upsample → Conv 3×3 → Conv 3×3 (Xavier Normal) → Tanh
                ──→ Denoised (1, 512, 512)
 ```
 
@@ -56,6 +56,12 @@ Each **VSS Block** performs 4-way 2D Selective Scan (SS2D) via `mamba-ssm`:
 - Uses **Spatially Coherent Z-shaped Scanning** (Snake Scan) instead of default raster scans to preserve spatial continuity of non-linear medical structures.
 - Z-scan (→↓), Reverse Z-scan (←↑), Column Z-scan (↓→), Reverse Column Z-scan (↑←)
 - O(n) complexity vs O(n²) for self-attention
+
+### Empirical Deprecations (Ablation Insights)
+During clinical-grade 512×512 scaling, we formally deprecated the following standard GAN conventions based on empirical WandB data:
+- **Spectral Normalization Disabled**: SN was removed from the Discriminator. When combined with WGAN-GP and aggressive NPS FFT losses, SN artificially choked the Discriminator's capacity, causing gradients to explode (e.g., GP loss spiking to 3800+) and Discriminator loss to permanently flatline at ~0.01.
+- **Xavier Normal Initialization**: Generator's final `Tanh` convolution is explicitly initialized with `Xavier Normal (gain=1.0)`. `Kaiming` caused severe Tanh saturation (white dot artifacts), while `Xavier Uniform (gain=0.1)` suppressed variance entirely, leading to dead gradients and uniform gray outputs for multiple epochs.
+- **NPS Shape Normalization**: `log1p` compression was dropped from the NPS loss as it crushed dynamic range. Both predicted and ground-truth spectra are now normalized to **unit-integral** before comparison, targeting the physical *shape* of the noise distribution rather than absolute magnitude.
 
 ### Anatomy-Aware NPS Loss Pipeline
 
@@ -91,9 +97,9 @@ NDCT (Ground Truth)                    Predicted (Generator Output)
     NDCT ⊙ Mask                  Pred ⊙ Mask
           │                             │
           ▼                             ▼
-    NPS(NDCT)                    NPS(Pred)     ← Stride=ps + 1st-Order Plane Detrending → 2D FFT → Radial Avg
+    NPS(NDCT)                    NPS(Pred)     ← 1st-Order Detrending → |FFT|² → Radial Avg → Unit-Integral
           │                             │
-          └──────── L₂ Loss ────────────┘
+          └──────── L₁ Loss ────────────┘
                       ×
               Tissue Weight (w_soft=2.0, w_lung=1.5, w_bone=0.0)
 ```
@@ -115,7 +121,7 @@ PG-MambaGAN/
 │   │   ├── vss_unet.py           # Full VSS-U-Net generator
 │   │   └── unet_baseline.py   # CNN baseline (ablation)
 │   ├── discriminators/
-│   │   └── patch_disc.py      # SN-PatchGAN (WGAN-GP)
+│   │   └── patch_disc.py      # PatchGAN (WGAN-GP, SN disabled)
 │   └── losses/
 │       ├── anatomy_nps.py        # ★ Anatomy-Aware NPS Loss
 │       ├── frequency_loss.py       # Multi-scale FFT loss
@@ -271,12 +277,13 @@ PG-MambaGAN implements three VRAM management strategies to enable
 
 ### Recommended VRAM Configurations
 
-| GPU | VRAM | batch_size | accumulation | Effective Batch |
-|---|---|---|---|---|
-| T4 | 16 GB | 1 | 8 | 8 |
-| RTX 3080 | 10 GB | 1 | 8 | 8 |
-| A100 | 40 GB | 4 | 2 | 8 |
-| A100 | 80 GB | 8 | 1 | 8 |
+| GPU | VRAM | batch_size | accumulation | Effective Batch | Notes |
+|---|---|---|---|---|---|
+| T4 | 16 GB | 1 | 8 | 8 | Minimum fallback configuration |
+| RTX 3080/4090 | 10-24 GB | 8 | 1 | 8 | Standard. AMP keeps 512×512 peak VRAM ~12.6GB |
+| A100 | 40 GB | 16 | 1 | 16 | High-throughput batching |
+
+> **Note on EMA Decay**: Exponential Moving Average (EMA) decay is tuned to `0.99` rather than the conventional `0.999`. A decay of `0.999` created too much lag for diagnostic logging, rendering visual feedback on W&B "stale" relative to the actively learning Generator.
 
 ---
 
