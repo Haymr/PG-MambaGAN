@@ -49,6 +49,8 @@ data/processed/
 # Logs
 *.log
 wandb/
+docs/WandB Results/
+docs/llm/*.jpeg
 
 # Misc
 .env
