@@ -49,8 +49,11 @@ def load_generator(checkpoint_path: str, device: str) -> torch.nn.Module:
     
     if gen_type == "vss_unet":
         model = VSSUNet(
+            in_channels=config.get("model", {}).get("channels", 1),
+            out_channels=config.get("model", {}).get("channels", 1),
             embed_dim=gc.get("embed_dim", 96),
             depths=gc.get("depths", [2, 2, 4, 2]),
+            patch_size=gc.get("patch_size", 4),
             use_checkpoint=False,  # Not needed for eval
         )
     else:
