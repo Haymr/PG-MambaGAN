@@ -212,7 +212,7 @@ class VolumeAssembler:
             else:
                 pred = self.generator(ldct_slice)
             
-            pred_slices.append(pred.squeeze().cpu().numpy())
+            pred_slices.append(pred.float().squeeze().cpu().numpy())
         
         pred_vol = np.stack(pred_slices)  # (N, H, W)
         
