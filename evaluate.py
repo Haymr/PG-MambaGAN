@@ -95,7 +95,7 @@ def evaluate_2d(
                 predicted = generator(ldct)
             
             # Compute metrics on CPU numpy
-            pred_np = predicted.squeeze().cpu().numpy()
+            pred_np = predicted.float().squeeze().cpu().numpy()
             ndct_np = ndct.squeeze().cpu().numpy()
             
             # Body mask to prevent background air inflation
@@ -214,7 +214,7 @@ def evaluate_hallucination(
                 with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16,
                                          enabled=(device == "cuda")):
                     pred = generator(x)
-                pred_slices.append(pred.squeeze().cpu().numpy())
+                pred_slices.append(pred.float().squeeze().cpu().numpy())
         
         pred_vol = np.stack(pred_slices)
         
@@ -258,7 +258,7 @@ def evaluate_clinical(
                 with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16,
                                          enabled=(device == "cuda")):
                     pred = generator(x)
-                pred_slices.append(pred.squeeze().cpu().numpy())
+                pred_slices.append(pred.float().squeeze().cpu().numpy())
         
         pred_vol = np.stack(pred_slices)
         
