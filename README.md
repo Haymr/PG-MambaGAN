@@ -1,5 +1,10 @@
 # PG-MambaGAN
 
+> 🚨 **Academic Notice: Under Peer Review**
+> 
+> **IMPORTANT:** This repository contains the official codebase and core implementation of the **PG-MambaGAN** architecture. This manuscript and its comprehensive benchmarks have been submitted and are currently **under peer review** in a top-tier medical imaging journal.
+> 
+> Independent replication, unauthorized publishing of scientific papers using this exact codebase, or utilizing the proprietary Anatomy-Aware NPS Loss without prior academic consent and proper citation is strictly prohibited during the review process.
 > **Physics-Guided Mamba-GAN for Low-Dose CT Denoising**
 >
 > *The first framework unifying Visual State Space (Mamba) architecture,
@@ -341,8 +346,8 @@ L_total = λ_adv  · L_wasserstein      (1.0)                        — WGAN-GP
 @article{pg-mambagan-2026,
   title={PG-MambaGAN: Physics-Guided Visual State Space GAN for 
          Anatomy-Aware Low-Dose CT Denoising},
-  author={[Authors]},
-  journal={[Target: IEEE TMI / Medical Image Analysis]},
+  author={Çayırcı, Serhan Ege and Akkurt, Şinasi Onuralp and Aki, Koray},
+  journal={Under Peer Review},
   year={2026}
 }
 ```
