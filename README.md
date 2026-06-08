@@ -1,5 +1,9 @@
 # PG-MambaGAN
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20596161.svg)](https://doi.org/10.5281/zenodo.20596161)
+[![License](https://img.shields.io/badge/License-All_Rights_Reserved-yellow.svg)]()
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.12%2B-EE4C2C.svg?logo=pytorch)]()
+
 > 🚨 **Academic Notice: Under Peer Review**
 > 
 > **IMPORTANT:** This repository contains the official codebase and core implementation of the **PG-MambaGAN** architecture. This manuscript and its comprehensive benchmarks have been submitted and are currently **under peer review** in a top-tier medical imaging journal.
