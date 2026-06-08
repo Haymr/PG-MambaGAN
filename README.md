@@ -368,4 +368,6 @@ L_total = λ_adv  · L_wasserstein      (1.0)                        — WGAN-GP
 
 ## 📜 License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+**All Rights Reserved.**
+
+This software is currently withheld from open licensing pending academic peer-review publication. Unauthorized academic publishing or replication is strictly prohibited. Full open-source licensing (MIT) will be restored upon manuscript acceptance. See [LICENSE](LICENSE) for details.
