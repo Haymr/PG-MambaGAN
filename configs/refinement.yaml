@@ -1,0 +1,87 @@
+# =============================================
+# PG-MambaGAN Texture Refinement Config
+# Fine-tune from best.pth (epoch 78)
+# Goal: Reduce L1 dominance, boost adversarial
+# =============================================
+
+model:
+  generator: "vss_unet"
+  discriminator: "patchgan_sn"
+  img_size: 512
+  channels: 1
+
+generator:
+  embed_dim: 96
+  depths: [2, 2, 4, 2]
+  patch_size: 2
+  drop_rate: 0.0
+  drop_path_rate: 0.1            # Slightly lower — stability during fine-tuning
+  gradient_checkpointing: true
+
+discriminator:
+  filters: [64, 128, 256, 512]
+  use_spectral_norm: false
+
+loss:
+  lambda_adv: 2.0                # 1→2: Boost adversarial pressure for texture
+  lambda_perceptual: 10.0        # Unchanged
+  lambda_freq: 1.0               # Unchanged
+
+  # L1: Cosine decay 3→1 (gradual transition, no sudden shock)
+  l1_start: 3.0                  # Start with mild L1 — prevent instability
+  l1_end: 1.0                    # End with minimal L1 — let texture emerge
+
+  # NPS: Fixed at maximum — physics constraint must not degrade
+  nps_start: 15.0
+  nps_end: 15.0
+
+  gradient_penalty: 10.0
+  nps_tissue_weights:
+    soft_tissue: 2.0
+    lung: 1.5
+    fat: 1.0
+    bone: 0.0
+    air: 0.0
+  nps_mask_source: "ndct"
+  nps_morphological_kernel: 5
+
+training:
+  epochs: 20                     # Short and safe — overfitting risk is low
+  batch_size: 8
+  gradient_accumulation: 1
+  learning_rate_g: 2.0e-5        # G slightly faster — learn texture details
+  learning_rate_d: 1.0e-5        # D slower — give G advantage
+  beta1: 0.0
+  beta2: 0.99
+  n_critic: 3                    # 5→3: More breathing room for Generator
+  ema_decay: 0.999               # Slower EMA during fine-tuning
+  mixed_precision: true
+  precision_dtype: "bfloat16"
+  scheduler: "constant"          # Fixed LR — no decay needed for 20 epochs
+  warmup_epochs: 0               # No warmup — pre-trained model
+
+data:
+  dataset: "mayo"
+  total_patients: 300
+  data_root: null
+  structure: "flat"
+  patient_split:
+    train_ratio: 0.8
+    val_ratio: 0.1
+    test_ratio: 0.1
+  augmentation:
+    horizontal_flip: true
+    vertical_flip: false
+    rotation: true
+    scale_range: [0.95, 1.05]
+
+paths:
+  data_root: null
+  output_dir: "experiments/refinement"
+  checkpoint_dir: null
+
+wandb:
+  project: "pg-mambagan-refinement"
+  entity: null
+  log_images_every: 1
+  log_gradients: true

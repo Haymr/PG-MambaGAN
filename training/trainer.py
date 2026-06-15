@@ -142,11 +142,17 @@ class Trainer:
     # ------------------------------------------------------------------
     
     def _build_scheduler(self, optimizer, warmup_epochs):
-        """Cosine annealing with linear warmup."""
+        """Build LR scheduler. Supports 'cosine' (default) and 'constant'."""
         from torch.optim.lr_scheduler import (
-            CosineAnnealingLR, LinearLR, SequentialLR
+            CosineAnnealingLR, LinearLR, SequentialLR, LambdaLR
         )
         
+        sched_type = self.config.get("training", {}).get("scheduler", "cosine")
+        
+        if sched_type == "constant":
+            return LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0)
+        
+        # Default: Cosine with warmup
         warmup = LinearLR(optimizer, start_factor=0.01, total_iters=warmup_epochs)
         cosine = CosineAnnealingLR(optimizer, T_max=self.epochs - warmup_epochs)
         
@@ -707,3 +713,19 @@ class Trainer:
         
         print(f"  ✅ Resumed from epoch {self.start_epoch} "
               f"(step {self.global_step})")
+    
+    def load_finetune(self, path: str):
+        """Load only G/D/EMA weights for fine-tuning (fresh optimizer & scheduler)."""
+        ckpt = torch.load(path, map_location=self.device, weights_only=False)
+        
+        self.G.load_state_dict(ckpt["generator"])
+        self.D.load_state_dict(ckpt["discriminator"])
+        
+        if "g_ema" in ckpt:
+            self.G_ema.load_state_dict(ckpt["g_ema"])
+        
+        # Optimizer ve scheduler yüklenmez — sıfırdan başlar
+        # start_epoch sıfırda kalır — 0'dan epochs'a kadar yeni eğitim
+        src_epoch = ckpt.get("epoch", "?")
+        print(f"  🔧 Fine-tune mode: loaded G/D/EMA weights from epoch {src_epoch}")
+        print(f"     Optimizer & scheduler: fresh (not restored)")

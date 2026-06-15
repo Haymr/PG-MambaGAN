@@ -149,6 +149,8 @@ def main():
                         help="Override output directory")
     parser.add_argument("--resume", type=str, default=None,
                         help="Path to checkpoint for resuming")
+    parser.add_argument("--finetune", type=str, default=None,
+                        help="Path to checkpoint for fine-tuning (fresh optimizer)")
     parser.add_argument("--batch-size", type=int, default=None,
                         help="Override physical batch size")
     parser.add_argument("--epochs", type=int, default=None,
@@ -231,6 +233,10 @@ def main():
     # Resume
     if args.resume:
         trainer.load_checkpoint(args.resume)
+    
+    # Fine-tune (load weights only, fresh optimizer)
+    if args.finetune:
+        trainer.load_finetune(args.finetune)
     
     # ---- Train ----
     trainer.train(train_loader, val_loader)
