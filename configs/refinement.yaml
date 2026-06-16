@@ -1,7 +1,9 @@
 # =============================================
-# PG-MambaGAN Texture Refinement Config
-# Fine-tune from best.pth (epoch 78)
-# Goal: Reduce L1 dominance, boost adversarial
+# PG-MambaGAN Texture Refinement Config v2
+# Fine-tune from best.pth (epoch 78) — FRESH START
+# v1 post-mortem: L1 drop too aggressive (3→1) + adv too high (2.0)
+#                 → Discriminator dominated → Generator output corrupted
+# v2 strategy: Minimal intervention — L1 15→10, adv 1.5, LR 5e-6
 # =============================================
 
 model:
@@ -23,13 +25,13 @@ discriminator:
   use_spectral_norm: false
 
 loss:
-  lambda_adv: 2.0                # 1→2: Boost adversarial pressure for texture
+  lambda_adv: 1.5                # 1.0→1.5: Minimal adversarial boost (v1=2.0 was too aggressive)
   lambda_perceptual: 10.0        # Unchanged
   lambda_freq: 1.0               # Unchanged
 
-  # L1: Cosine decay 3→1 (gradual transition, no sudden shock)
-  l1_start: 3.0                  # Start with mild L1 — prevent instability
-  l1_end: 1.0                    # End with minimal L1 — let texture emerge
+  # L1: Cosine decay 15→10 (only 33% reduction — v1's 3→1 was 93% drop = fatal)
+  l1_start: 15.0                 # Same as where original training ended
+  l1_end: 10.0                   # Gentle relaxation — structural anchor stays strong
 
   # NPS: Fixed at maximum — physics constraint must not degrade
   nps_start: 15.0
@@ -46,18 +48,18 @@ loss:
   nps_morphological_kernel: 5
 
 training:
-  epochs: 20                     # Short and safe — overfitting risk is low
+  epochs: 30                     # 30 epochs — manual stop if needed
   batch_size: 8
   gradient_accumulation: 1
-  learning_rate_g: 2.0e-5        # G slightly faster — learn texture details
-  learning_rate_d: 1.0e-5        # D slower — give G advantage
+  learning_rate_g: 5.0e-6        # 4x lower than v1 — protect pre-trained weights
+  learning_rate_d: 5.0e-6        # Equal to G — remove D advantage (v1 D dominated)
   beta1: 0.0
   beta2: 0.99
-  n_critic: 3                    # 5→3: More breathing room for Generator
-  ema_decay: 0.999               # Slower EMA during fine-tuning
+  n_critic: 5                    # Restored to original — more stable WGAN-GP
+  ema_decay: 0.999
   mixed_precision: true
   precision_dtype: "bfloat16"
-  scheduler: "constant"          # Fixed LR — no decay needed for 20 epochs
+  scheduler: "constant"          # Fixed LR
   warmup_epochs: 0               # No warmup — pre-trained model
 
 data:
@@ -77,11 +79,11 @@ data:
 
 paths:
   data_root: null
-  output_dir: "experiments/refinement"
+  output_dir: "experiments/refinement_v2"
   checkpoint_dir: null
 
 wandb:
-  project: "pg-mambagan-refinement"
+  project: "pg-mambagan-refinement-v2"
   entity: null
   log_images_every: 1
   log_gradients: true
