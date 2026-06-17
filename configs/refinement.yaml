@@ -1,9 +1,10 @@
 # =============================================
-# PG-MambaGAN Texture Refinement Config v2
-# Fine-tune from best.pth (epoch 78) — FRESH START
-# v1 post-mortem: L1 drop too aggressive (3→1) + adv too high (2.0)
-#                 → Discriminator dominated → Generator output corrupted
-# v2 strategy: Minimal intervention — L1 15→10, adv 1.5, LR 5e-6
+# PG-MambaGAN Texture Refinement Config v3
+# Fine-tune from best.pth (epoch 78) — THE GOLDEN RATIO
+# v2 post-mortem: We accidentally dropped L1 from its actual epoch 78 
+#                 effective value (24.7) down to 15.0, causing PSNR drift.
+# v3 strategy: Freeze weights exactly at Epoch 78 optimum and use cosine LR
+#              to let the model organically settle into the local minimum.
 # =============================================
 
 model:
@@ -17,7 +18,7 @@ generator:
   depths: [2, 2, 4, 2]
   patch_size: 2
   drop_rate: 0.0
-  drop_path_rate: 0.1            # Slightly lower — stability during fine-tuning
+  drop_path_rate: 0.1
   gradient_checkpointing: true
 
 discriminator:
@@ -25,17 +26,17 @@ discriminator:
   use_spectral_norm: false
 
 loss:
-  lambda_adv: 1.5                # 1.0→1.5: Minimal adversarial boost (v1=2.0 was too aggressive)
-  lambda_perceptual: 10.0        # Unchanged
-  lambda_freq: 1.0               # Unchanged
+  lambda_adv: 1.0                # Restored to original golden ratio
+  lambda_perceptual: 10.0
+  lambda_freq: 1.0
 
-  # L1: Cosine decay 15→10 (only 33% reduction — v1's 3→1 was 93% drop = fatal)
-  l1_start: 15.0                 # Same as where original training ended
-  l1_end: 10.0                   # Gentle relaxation — structural anchor stays strong
+  # L1: Frozen at effective Epoch 78 value (24.7 -> rounded to 25.0)
+  l1_start: 25.0
+  l1_end: 25.0
 
-  # NPS: Fixed at maximum — physics constraint must not degrade
-  nps_start: 15.0
-  nps_end: 15.0
+  # NPS: Frozen at effective Epoch 78 value (11.4 -> rounded to 11.0)
+  nps_start: 11.0
+  nps_end: 11.0
 
   gradient_penalty: 10.0
   nps_tissue_weights:
@@ -48,19 +49,19 @@ loss:
   nps_morphological_kernel: 5
 
 training:
-  epochs: 30                     # 30 epochs — manual stop if needed
+  epochs: 30                     # Will likely stop early via patience
   batch_size: 8
   gradient_accumulation: 1
-  learning_rate_g: 5.0e-6        # 4x lower than v1 — protect pre-trained weights
-  learning_rate_d: 5.0e-6        # Equal to G — remove D advantage (v1 D dominated)
+  learning_rate_g: 2.0e-5        # Recommended mid-range for settling
+  learning_rate_d: 2.0e-5        
   beta1: 0.0
   beta2: 0.99
-  n_critic: 5                    # Restored to original — more stable WGAN-GP
+  n_critic: 5                    # Stable WGAN-GP
   ema_decay: 0.999
   mixed_precision: true
   precision_dtype: "bfloat16"
-  scheduler: "constant"          # Fixed LR
-  warmup_epochs: 0               # No warmup — pre-trained model
+  scheduler: "cosine"            # Smooth settling into the minimum
+  warmup_epochs: 0
 
 data:
   dataset: "mayo"
@@ -79,11 +80,11 @@ data:
 
 paths:
   data_root: null
-  output_dir: "experiments/refinement_v2"
+  output_dir: "experiments/refinement_v3"
   checkpoint_dir: null
 
 wandb:
-  project: "pg-mambagan-refinement-v2"
+  project: "pg-mambagan-refinement-v3"
   entity: null
   log_images_every: 1
   log_gradients: true
