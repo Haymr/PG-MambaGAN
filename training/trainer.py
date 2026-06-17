@@ -153,6 +153,9 @@ class Trainer:
             return LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0)
         
         # Default: Cosine with warmup
+        if warmup_epochs <= 0:
+            return CosineAnnealingLR(optimizer, T_max=self.epochs)
+            
         warmup = LinearLR(optimizer, start_factor=0.01, total_iters=warmup_epochs)
         cosine = CosineAnnealingLR(optimizer, T_max=self.epochs - warmup_epochs)
         
