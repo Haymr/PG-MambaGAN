@@ -50,7 +50,9 @@ data/processed/
 *.log
 wandb/
 docs/WandB Results/
-docs/llm/*.jpeg
+docs/llm/
+LLM_DOCUMENTATION.md
+git_log_output.txt
 
 # Misc
 .env

@@ -2,10 +2,9 @@
 
 All notable changes to the **PG-MambaGAN** project will be documented in this file.
 
-## [v1.0.0] - 2026-05-08 (Clinical Grade Release)
+## [v1.0.0] - 2026-05-08 (512×512 Architecture Stabilization)
 ### Added
 - **Unit-Integral Shape Normalization** in `anatomy_nps.py`. NPS loss now directly optimizes the physical *shape* of the noise spectrum via `L1 Loss` rather than absolute magnitudes via `L2`.
-- Documentation hierarchy in `docs/llm/` generated for LLM autonomy and advanced maintainer debugging.
 
 ### Changed
 - **Xavier Normal Initialization**: Generator's final layer init changed from `Kaiming` (which caused Tanh saturation / white dots) and `Xavier Uniform` (which suppressed variance and killed gradients) to `Xavier Normal (gain=1.0)`.

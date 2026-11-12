@@ -4,16 +4,19 @@
 [![License](https://img.shields.io/badge/License-All_Rights_Reserved-yellow.svg)]()
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.12%2B-EE4C2C.svg?logo=pytorch)]()
 
-> 🚨 **Academic Notice: Under Peer Review**
-> 
-> **IMPORTANT:** This repository contains the official codebase and core implementation of the **PG-MambaGAN** architecture. This manuscript and its comprehensive benchmarks have been submitted and are currently **under peer review** in a top-tier medical imaging journal.
-> 
-> Independent replication, unauthorized publishing of scientific papers using this exact codebase, or utilizing the proprietary Anatomy-Aware NPS Loss without prior academic consent and proper citation is strictly prohibited during the review process.
-> **Physics-Guided Mamba-GAN for Low-Dose CT Denoising**
+> **Research Status — November 2026**
 >
-> *The first framework unifying Visual State Space (Mamba) architecture,
-> WGAN-GP adversarial stability, and Anatomy-Aware Noise Power Spectrum loss
-> for clinically validated CT denoising with hallucination risk control.*
+> This repository contains an earlier public research implementation of **PG-MambaGAN**, a framework exploring Visual State Space Models (Mamba), WGAN-GP, and Anatomy-Aware Noise Power Spectrum (NPS) loss for low-dose CT denoising.
+>
+> While the core generator and physics-guided loss architecture form the basis of our ongoing study, subsequent refinements, extended experiments, and the finalized evaluation pipeline are maintained in a separate private research repository as part of our manuscript currently being prepared for journal submission.
+>
+> The manuscript has **not yet undergone journal peer review**. This public repository is provided as an early research archive and should not be interpreted as the final manuscript implementation or as evidence of clinical validation.
+>
+> **Research use only. Not intended for clinical deployment.**
+
+**Physics-Guided Mamba-GAN for Low-Dose CT Denoising**
+
+*A framework unifying Visual State Space (Mamba) architecture, WGAN-GP adversarial stability, and Anatomy-Aware Noise Power Spectrum loss for physics-guided CT denoising and radiomic feature preservation analysis.*
 
 ---
 
@@ -25,7 +28,7 @@ PG-MambaGAN introduces three novel contributions to low-dose CT denoising:
 |---|---|---|
 | **Architecture** | CNN (U-Net) bottleneck | Full VSS-U-Net — Mamba SSM at every encoder/decoder stage |
 | **Loss Function** | Global pixel-wise L1/L2 | **Anatomy-Aware NPS** — tissue-specific spectral matching via NDCT-guided masking |
-| **Validation** | PSNR/SSIM only | 3D volumetric continuity + radiomic hallucination testing + clinical task validation |
+| **Validation** | PSNR/SSIM only | 3D volumetric continuity + radiomic feature preservation testing + task-oriented image quality metrics |
 
 ### Key Design Decisions
 - **NDCT-Only Masking**: Tissue segmentation masks derived exclusively from normal-dose ground truth — never from noisy LDCT or model predictions
@@ -241,7 +244,7 @@ python train.py \
 ### 3. Evaluate
 
 ```bash
-# Full Q1-grade evaluation pipeline
+# Full evaluation pipeline
 python evaluate.py \
     --checkpoint experiments/checkpoints/best.pth \
     --data-path /path/to/processed \
@@ -303,8 +306,8 @@ The evaluation pipeline produces four categories of evidence:
 1. **2D Per-Slice**: PSNR, SSIM, RMSE, MAE (computed with body contouring masks to prevent background air inflation)
    *Note: MAE (L1) and Best Checkpoint saving dynamically use a dual-logging system (Normalized Space vs Physical Hounsfield Space) for direct clinical interpretability.*
 2. **3D Volumetric**: Multi-planar (Axial, Coronal, Sagittal) 3D-SSIM/3D-PSNR, plus **Flickering Index** (z-axis continuity)
-3. **Hallucination Risk**: Radiomic feature preservation (First Order, forced 2D-GLCM, GLRLM)
-4. **Clinical Validity**: Edge Preservation Index (EPI), Contrast-to-Noise Ratio (CNR)
+3. **Radiomic Feature Analysis**: Radiomic feature preservation (First Order, forced 2D-GLCM, GLRLM)
+4. **Task-Oriented Image Quality**: Edge Preservation Index (EPI), Contrast-to-Noise Ratio (CNR)
 
 All 3D volumes are exported as NIfTI (`.nii.gz`) with DICOM-derived affine matrices
 preserving `PixelSpacing`, `SliceThickness`, and `ImagePositionPatient` metadata.
@@ -347,11 +350,11 @@ L_total = λ_adv  · L_wasserstein      (1.0)                        — WGAN-GP
 ## 📖 Citation
 
 ```bibtex
-@article{pg-mambagan-2026,
+@unpublished{pg-mambagan-2026,
   title={PG-MambaGAN: Physics-Guided Visual State Space GAN for 
          Anatomy-Aware Low-Dose CT Denoising},
   author={Çayırcı, Serhan Ege and Akkurt, Şinasi Onuralp and Aki, Koray},
-  journal={Under Peer Review},
+  note={Manuscript in preparation},
   year={2026}
 }
 ```
@@ -370,4 +373,4 @@ L_total = λ_adv  · L_wasserstein      (1.0)                        — WGAN-GP
 
 **All Rights Reserved.**
 
-This software is currently withheld from open licensing pending academic peer-review publication. Unauthorized academic publishing or replication is strictly prohibited. Full open-source licensing (MIT) will be restored upon manuscript acceptance. See [LICENSE](LICENSE) for details.
+This software is currently withheld from open licensing pending manuscript submission and peer review. Unauthorized academic publishing or replication is strictly prohibited. Full open-source licensing (MIT) will be restored upon manuscript publication. **Research use only; not intended for clinical deployment.** See [LICENSE](LICENSE) for details.
